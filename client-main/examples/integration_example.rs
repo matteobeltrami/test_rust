@@ -1,11 +1,10 @@
 /// Example demonstrating how the client integrates with the drone network
 /// This shows the expected usage pattern when used with the network initializer
 
-use client::{Client, WebBrowserClient, ChatClient};
+use client::Client;
 use common::types::ClientType;
-use wg_internal::network::NodeId;
+use wg_internal::packet::Packet;
 use crossbeam::channel;
-use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let web_client = setup_web_browser_client().await?;
     simulate_web_browsing(&web_client).await?;
     
-    println!("\n" + &"=".repeat(60) + "\n");
+    println!("\n{}\n", "=".repeat(60));
     
     // === SCENARIO 2: Chat Client ===
     println!("📋 SCENARIO 2: Chat Client");  
@@ -34,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let chat_client = setup_chat_client().await?;
     simulate_chat_session(&chat_client).await?;
     
-    println!("\n" + &"=".repeat(60) + "\n");
+    println!("\n{}\n", "=".repeat(60));
     
     // === SCENARIO 3: Network Integration ===
     println!("📋 SCENARIO 3: Full Network Integration");
@@ -54,7 +53,7 @@ async fn setup_web_browser_client() -> Result<Client, Box<dyn std::error::Error>
     println!("🌐 Creating Web Browser Client...");
     
     // Create packet channel (normally handled by network initializer)
-    let (_sender, receiver) = channel::unbounded();
+    let (_sender, _receiver): (crossbeam::channel::Sender<Packet>, crossbeam::channel::Receiver<Packet>) = channel::unbounded();
     
     // Create client
     let client = Client::new(
@@ -195,9 +194,9 @@ fn example_network_initializer_integration() {
     println!("client.add_neighbor(2, drone2_sender).await;");
     println!();
     println!("// Start client processing");
-    println!("tokio::spawn(async move {");
+    println!("tokio::spawn(async move {{");
     println!("    client.start(client_receiver).await");
-    println!("});");
+    println!("}});");
     println!("```");
 }
 

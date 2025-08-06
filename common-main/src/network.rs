@@ -8,6 +8,7 @@ use crate::types::{ PendingQueue, SendingMap };
 
 
 
+#[derive(Debug)]
 pub enum NetworkError {
     TopologyError,
     PathNotFound,

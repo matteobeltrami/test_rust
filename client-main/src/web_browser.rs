@@ -14,22 +14,43 @@ pub struct WebBrowserClient {
     discovered_servers: Arc<Mutex<HashMap<NodeId, ServerType>>>,
 }
 
+// Web Browser Protocol Messages according to AP-protocol.md
 #[derive(Serialize, Deserialize, Debug)]
-struct WebRequest {
-    message_type: String,
-    file_id: Option<String>,
-    media_id: Option<String>,
+#[serde(tag = "message_type")]
+pub enum WebRequest {
+    #[serde(rename = "server_type?")]
+    ServerTypeQuery,
+    
+    #[serde(rename = "files_list?")]
+    FilesListQuery,
+    
+    #[serde(rename = "file?")]
+    FileQuery { file_id: String },
+    
+    #[serde(rename = "media?")]
+    MediaQuery { media_id: String },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct WebResponse {
-    response_type: String,
-    server_type: Option<String>,
-    files_list: Option<Vec<String>>,
-    file_data: Option<Vec<u8>>,
-    file_size: Option<usize>,
-    media_data: Option<Vec<u8>>,
-    error_message: Option<String>,
+#[serde(tag = "response_type")]
+pub enum WebResponse {
+    #[serde(rename = "server_type!")]
+    ServerTypeResponse { server_type: String },
+    
+    #[serde(rename = "files_list!")]
+    FilesListResponse { files: Vec<String> },
+    
+    #[serde(rename = "file!")]
+    FileResponse { file_size: usize, file_data: Vec<u8> },
+    
+    #[serde(rename = "media!")]
+    MediaResponse { media_data: Vec<u8> },
+    
+    #[serde(rename = "error_requested_not_found!")]
+    ErrorNotFound,
+    
+    #[serde(rename = "error_unsupported_request!")]
+    ErrorUnsupportedRequest,
 }
 
 impl WebBrowserClient {
@@ -71,20 +92,23 @@ impl WebBrowserClient {
 
     /// Get the type of a specific server
     pub async fn get_server_type(&self, server_id: NodeId) -> Result<ServerType, ClientError> {
-        let request = WebRequest {
-            message_type: "server_type?".to_string(),
-            file_id: None,
-            media_id: None,
-        };
+        let request = WebRequest::ServerTypeQuery;
 
         let route = self.find_route_to_server(server_id).await?;
         let response_data = self.assembler.send_message(&request, server_id, route).await?;
         
         if let Ok(response) = self.assembler.deserialize_message::<WebResponse>(&response_data) {
-            match response.server_type.as_deref() {
-                Some("text") => Ok(ServerType::TextServer),
-                Some("media") => Ok(ServerType::MediaServer),
-                Some("communication") => Ok(ServerType::CommunicationServer),
+            match response {
+                WebResponse::ServerTypeResponse { server_type } => {
+                    match server_type.as_str() {
+                        "text" => Ok(ServerType::TextServer),
+                        "media" => Ok(ServerType::MediaServer),
+                        "communication" => Ok(ServerType::CommunicationServer),
+                        _ => Err(ClientError::InvalidResponse),
+                    }
+                },
+                WebResponse::ErrorNotFound => Err(ClientError::ProtocolError("Server not found".to_string())),
+                WebResponse::ErrorUnsupportedRequest => Err(ClientError::ProtocolError("Request not supported".to_string())),
                 _ => Err(ClientError::InvalidResponse),
             }
         } else {
@@ -99,17 +123,18 @@ impl WebBrowserClient {
         if let Some(ServerType::TextServer) = discovered.get(&server_id) {
             drop(discovered);
 
-            let request = WebRequest {
-                message_type: "files_list?".to_string(),
-                file_id: None,
-                media_id: None,
-            };
+            let request = WebRequest::FilesListQuery;
 
             let route = self.find_route_to_server(server_id).await?;
             let response_data = self.assembler.send_message(&request, server_id, route).await?;
             
             if let Ok(response) = self.assembler.deserialize_message::<WebResponse>(&response_data) {
-                response.files_list.ok_or(ClientError::InvalidResponse)
+                match response {
+                    WebResponse::FilesListResponse { files } => Ok(files),
+                    WebResponse::ErrorNotFound => Err(ClientError::ProtocolError("Files not found".to_string())),
+                    WebResponse::ErrorUnsupportedRequest => Err(ClientError::ProtocolError("Request not supported".to_string())),
+                    _ => Err(ClientError::InvalidResponse),
+                }
             } else {
                 Err(ClientError::InvalidResponse)
             }
@@ -120,25 +145,19 @@ impl WebBrowserClient {
 
     /// Get a specific file from a text server
     pub async fn get_file(&self, server_id: NodeId, file_id: &str) -> Result<(usize, Vec<u8>), ClientError> {
-        let request = WebRequest {
-            message_type: "file?".to_string(),
-            file_id: Some(file_id.to_string()),
-            media_id: None,
+        let request = WebRequest::FileQuery {
+            file_id: file_id.to_string(),
         };
 
         let route = self.find_route_to_server(server_id).await?;
         let response_data = self.assembler.send_message(&request, server_id, route).await?;
         
         if let Ok(response) = self.assembler.deserialize_message::<WebResponse>(&response_data) {
-            match (response.file_size, response.file_data) {
-                (Some(size), Some(data)) => Ok((size, data)),
-                _ => {
-                    if response.error_message.is_some() {
-                        Err(ClientError::ProtocolError("File not found".to_string()))
-                    } else {
-                        Err(ClientError::InvalidResponse)
-                    }
-                }
+            match response {
+                WebResponse::FileResponse { file_size, file_data } => Ok((file_size, file_data)),
+                WebResponse::ErrorNotFound => Err(ClientError::ProtocolError("File not found".to_string())),
+                WebResponse::ErrorUnsupportedRequest => Err(ClientError::ProtocolError("Request not supported".to_string())),
+                _ => Err(ClientError::InvalidResponse),
             }
         } else {
             Err(ClientError::InvalidResponse)
@@ -152,23 +171,20 @@ impl WebBrowserClient {
         if let Some(ServerType::MediaServer) = discovered.get(&server_id) {
             drop(discovered);
 
-            let request = WebRequest {
-                message_type: "media?".to_string(),
-                file_id: None,
-                media_id: Some(media_id.to_string()),
+            let request = WebRequest::MediaQuery {
+                media_id: media_id.to_string(),
             };
 
             let route = self.find_route_to_server(server_id).await?;
             let response_data = self.assembler.send_message(&request, server_id, route).await?;
             
             if let Ok(response) = self.assembler.deserialize_message::<WebResponse>(&response_data) {
-                response.media_data.ok_or_else(|| {
-                    if response.error_message.is_some() {
-                        ClientError::ProtocolError("Media not found".to_string())
-                    } else {
-                        ClientError::InvalidResponse
-                    }
-                })
+                match response {
+                    WebResponse::MediaResponse { media_data } => Ok(media_data),
+                    WebResponse::ErrorNotFound => Err(ClientError::ProtocolError("Media not found".to_string())),
+                    WebResponse::ErrorUnsupportedRequest => Err(ClientError::ProtocolError("Request not supported".to_string())),
+                    _ => Err(ClientError::InvalidResponse),
+                }
             } else {
                 Err(ClientError::InvalidResponse)
             }
@@ -253,8 +269,45 @@ impl WebBrowserClient {
     }
 
     async fn find_route_to_server(&self, server_id: NodeId) -> Result<Vec<NodeId>, ClientError> {
+        // Use BFS to find path from self to server
+        use std::collections::{VecDeque, HashSet};
+        
         let network = self.network_view.read().await;
-        network.find_path(server_id)
-            .map_err(|_| ClientError::NetworkError("No route to server".to_string()))
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        let mut parent: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
+        
+        queue.push_back(self.id);
+        visited.insert(self.id);
+        
+        while let Some(current) = queue.pop_front() {
+            if current == server_id {
+                // Reconstruct path
+                let mut path = vec![server_id];
+                let mut node = server_id;
+                
+                while let Some(&prev) = parent.get(&node) {
+                    path.push(prev);
+                    node = prev;
+                }
+                
+                path.reverse();
+                println!("📍 Found route to server {}: {:?}", server_id, path);
+                return Ok(path);
+            }
+            
+            // Find current node in network
+            if let Some(network_node) = network.nodes.iter().find(|n| n.get_id() == current) {
+                for &neighbor in network_node.get_adjacents() {
+                    if !visited.contains(&neighbor) {
+                        visited.insert(neighbor);
+                        parent.insert(neighbor, current);
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+        
+        Err(ClientError::NetworkError(format!("No route found to server {}", server_id)))
     }
 }

@@ -1,7 +1,7 @@
 use wg_internal::network::{NodeId, SourceRoutingHeader};
 use wg_internal::packet::{Packet, FloodRequest, PacketType, NodeType};
 use crossbeam::channel::{Receiver, Sender};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use common::network::{Network, Node};
 use common::types::{ClientType, ClientError};
@@ -18,6 +18,8 @@ pub struct Client {
     neighbors: Arc<Mutex<HashMap<NodeId, Sender<Packet>>>>,
     network_view: Arc<RwLock<Network>>,
     session_counter: Arc<Mutex<u64>>,
+    flood_counter: Arc<Mutex<u64>>,
+    seen_floods: Arc<Mutex<HashSet<(u64, NodeId)>>>, // (flood_id, initiator_id)
     assembler: Arc<Assembler>,
     web_browser: Option<Arc<WebBrowserClient>>,
     chat_client: Option<Arc<ChatClient>>,
@@ -84,6 +86,8 @@ impl Client {
             neighbors,
             network_view,
             session_counter: Arc::new(Mutex::new(0)),
+            flood_counter: Arc::new(Mutex::new(0)),
+            seen_floods: Arc::new(Mutex::new(HashSet::new())),
             assembler,
             web_browser,
             chat_client,
@@ -172,7 +176,7 @@ impl Client {
         packet: Packet,
         assembler: &Arc<Assembler>,
         network_view: &Arc<RwLock<Network>>,
-        client_id: NodeId,
+        _client_id: NodeId,
         chat_client: &Option<Arc<ChatClient>>,
     ) -> Result<(), ClientError> {
         match &packet.pack_type {
@@ -181,16 +185,15 @@ impl Client {
             },
             PacketType::MsgFragment(_) | PacketType::Ack(_) | PacketType::Nack(_) => {
                 // Check if this is a chat message
-                if let PacketType::MsgFragment(fragment) = &packet.pack_type {
+                if let PacketType::MsgFragment(_fragment) = &packet.pack_type {
                     // Try to deserialize as chat message first
                     if let Some(chat) = chat_client {
                         if let Ok(complete_data) = Self::try_assemble_fragment(packet.clone(), assembler).await {
                             if let Ok(chat_msg) = Self::try_parse_chat_message(&complete_data) {
-                                let _ = chat.handle_incoming_message(
-                                    chat_msg.from_client.unwrap_or_default(),
-                                    chat_msg.message_content.unwrap_or_default()
-                                ).await;
-                                return Ok(());
+                                if let crate::chat_client::ChatResponse::MessageFrom { client_id, message } = chat_msg {
+                                    let _ = chat.handle_incoming_message(client_id, message).await;
+                                    return Ok(());
+                                }
                             }
                         }
                     }
@@ -220,7 +223,6 @@ impl Client {
 
     /// Try to parse data as chat message
     fn try_parse_chat_message(data: &[u8]) -> Result<crate::chat_client::ChatResponse, ClientError> {
-        use crate::chat_client::ChatResponse;
         bincode::deserialize(data)
             .map_err(|_| ClientError::SerializationError("Not a chat message".to_string()))
     }
@@ -230,6 +232,8 @@ impl Client {
         flood_response: &wg_internal::packet::FloodResponse,
         network_view: &Arc<RwLock<Network>>,
     ) -> Result<(), ClientError> {
+        println!("📥 Received flood response with {} nodes in path", flood_response.path_trace.len());
+        
         let mut network = network_view.write().await;
         
         // Process path trace to update network topology
@@ -241,16 +245,28 @@ impl Client {
                 neighbors.push(flood_response.path_trace[i - 1].0);
             }
             
-            // Add next node as neighbor
+            // Add next node as neighbor  
             if i + 1 < flood_response.path_trace.len() {
                 neighbors.push(flood_response.path_trace[i + 1].0);
             }
             
             // Try to update existing node or add new one
             match network.update_node(node_id, neighbors.clone()) {
-                Ok(_) => {},
+                Ok(_) => {
+                    println!("Updated node {} (type: {:?}) with neighbors: {:?}", 
+                             node_id, node_type, neighbors);
+                },
                 Err(_) => {
-                    let _ = network.add_node(Node::new(node_id, node_type, neighbors));
+                    let new_node = Node::new(node_id, node_type, neighbors.clone());
+                    match network.add_node(new_node) {
+                        Ok(_) => {
+                            println!("Added new node {} (type: {:?}) with neighbors: {:?}", 
+                                     node_id, node_type, neighbors);
+                        },
+                        Err(e) => {
+                            eprintln!("Failed to add node {}: {:?}", node_id, e);
+                        }
+                    }
                 }
             }
         }
@@ -260,25 +276,44 @@ impl Client {
 
     /// Perform network discovery using flood protocol
     pub async fn discover_network(&self) -> Result<(), ClientError> {
+        let flood_id = {
+            let mut counter = self.flood_counter.lock().await;
+            *counter += 1;
+            *counter
+        };
+
         let session_id = {
             let mut counter = self.session_counter.lock().await;
             *counter += 1;
             *counter
         };
 
-        let flood_request = FloodRequest::new(session_id, self.id);
-        let packet = Packet::new_flood_request(
-            SourceRoutingHeader::empty_route(),
+        println!("🔍 Starting network discovery with flood_id: {}", flood_id);
+
+        // Create flood request with path trace starting with ourselves
+        let mut path_trace = Vec::new();
+        path_trace.push((self.id, NodeType::Client));
+
+        let flood_request = FloodRequest {
+            flood_id,
+            initiator_id: self.id,
+            path_trace,
+        };
+
+        let packet = Packet {
+            pack_type: PacketType::FloodRequest(flood_request),
+            routing_header: SourceRoutingHeader::empty_route(),
             session_id,
-            flood_request,
-        );
+        };
 
         // Send flood request to all neighbors
         let neighbors = self.neighbors.lock().await;
+        println!("Sending flood request to {} neighbors", neighbors.len());
+        
         for (neighbor_id, sender) in neighbors.iter() {
             match sender.send(packet.clone()) {
-                Ok(_) => println!("Sent network discovery to neighbor {}", neighbor_id),
-                Err(e) => eprintln!("Failed to send discovery to neighbor {}: {:?}", neighbor_id, e),
+                Ok(_) => println!("Sent flood request to neighbor {}", neighbor_id),
+                Err(e) => eprintln!("Failed to send flood request to neighbor {}: {:?}", neighbor_id, e),
             }
         }
 
@@ -306,7 +341,70 @@ impl Client {
         println!("Removed neighbor: {}", neighbor_id);
     }
 
-    /// Get client ID
+    /// Compute route to destination using BFS
+    pub async fn compute_route_to(&self, destination: NodeId) -> Result<Vec<NodeId>, ClientError> {
+        let network = self.network_view.read().await;
+        
+        // Use BFS to find path from self to destination
+        let mut visited = HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        let mut parent: HashMap<NodeId, NodeId> = HashMap::new();
+        
+        queue.push_back(self.id);
+        visited.insert(self.id);
+        
+        while let Some(current) = queue.pop_front() {
+            if current == destination {
+                // Reconstruct path
+                let mut path = vec![destination];
+                let mut node = destination;
+                
+                while let Some(&prev) = parent.get(&node) {
+                    path.push(prev);
+                    node = prev;
+                }
+                
+                path.reverse();
+                println!("📍 Computed route to {}: {:?}", destination, path);
+                return Ok(path);
+            }
+            
+            // Find current node in network
+            if let Some(network_node) = network.nodes.iter().find(|n| n.get_id() == current) {
+                for &neighbor in network_node.get_adjacents() {
+                    if !visited.contains(&neighbor) {
+                        visited.insert(neighbor);
+                        parent.insert(neighbor, current);
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+        
+        Err(ClientError::NetworkError(format!("No route found to destination {}", destination)))
+    }
+
+    /// Get all servers of a specific type from the network
+    pub async fn get_servers_by_type(&self, _server_type: NodeType) -> Vec<NodeId> {
+        let network = self.network_view.read().await;
+        network.nodes.iter()
+            .filter(|node| {
+                matches!(node.get_node_type(), NodeType::Server) 
+                // Note: We can't distinguish server types from topology alone
+                // This would need to be enhanced with server type discovery
+            })
+            .map(|node| node.get_id())
+            .collect()
+    }
+
+    /// Get all servers from the network (we'll determine types by querying)
+    pub async fn get_all_servers(&self) -> Vec<NodeId> {
+        let network = self.network_view.read().await;
+        network.nodes.iter()
+            .filter(|node| matches!(node.get_node_type(), NodeType::Server))
+            .map(|node| node.get_id())
+            .collect()
+    }
     pub fn get_id(&self) -> NodeId {
         self.id
     }

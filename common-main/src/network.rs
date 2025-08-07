@@ -15,6 +15,18 @@ pub enum NetworkError {
     NodeNotFound,
 }
 
+impl std::fmt::Display for NetworkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetworkError::TopologyError => write!(f, "Topology error"),
+            NetworkError::PathNotFound => write!(f, "Path not found"),
+            NetworkError::NodeNotFound => write!(f, "Node not found"),
+        }
+    }
+}
+
+impl std::error::Error for NetworkError {}
+
 
 pub struct Node {
     id: NodeId,
@@ -55,6 +67,7 @@ impl std::fmt::Debug for Node{
     }
 }
 
+#[derive(Debug)]
 pub struct Network {
     pub nodes: Vec<Node>
 }

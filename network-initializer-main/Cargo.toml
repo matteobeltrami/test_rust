@@ -1,11 +1,12 @@
 [package]
 name = "network-initializer"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 wg_internal = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = ["debug"] }
 
+# Drone implementations from different groups
 null-pointer-drone = { git = "https://github.com/The-Null-Pointer-Patrol/null-pointer-drone.git", branch = "main" }
 wg_2024-rust = { git = "https://github.com/LuigiMiazzo17/unitn-advancedProgramming-WGL_2024-drone.git"}
 d-r-o-n-e_drone = { git = "https://github.com/AP-2024-25-D-R-O-N-E/drone.git"}
@@ -16,6 +17,15 @@ rusty_drones = { git = "https://github.com/rusty-drone-2024/rusty-drone.git", br
 rustbusters-drone = { git = "https://github.com/Rustbusters/drone.git", branch = "main" }
 rustafarian-drone = { git = "https://github.com/Rustafarian-Unitn/rustafarian-drone", branch = "main"}
 lockheedrustin-drone = { git = "https://github.com/Lockheed-Rustin/drone.git", branch = "main" }
+
+# Our server implementations
+text-server = { path = "../text-server-main" }
+media-server = { path = "../media-server-main" }  
+chat-server = { path = "../chat-server-main" }
+
+# Other dependencies
 toml = "0.9.2"
 serde = "1.0.219"
 clap = { version = "4.5.41", features = ["derive"] }
+crossbeam = "0.8.4"
+tokio = { version = "1.47.1", features = ["full"] }

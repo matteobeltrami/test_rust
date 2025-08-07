@@ -4,13 +4,14 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use crossbeam::channel::Sender;
 use wg_internal::packet::{Packet, PacketType};
 use wg_internal::network::NodeId;
+use serde::{Deserialize, Serialize};
 
 // Type aliases for better code organization
 pub type PendingQueue = Arc<Mutex<HashMap<u64, oneshot::Sender<PacketType>>>>;
 pub type SendingMap = Arc<RwLock<HashMap<NodeId, Sender<Packet>>>>;
 
 // High-level message types for client-server communication
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     // Web Browser Messages
     ServerTypeRequest,
@@ -24,7 +25,7 @@ pub enum ClientMessage {
     MessageFor(String, String), // (target_client, message)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerResponse {
     // Web Server Responses
     ServerType(ServerType),
@@ -40,7 +41,7 @@ pub enum ServerResponse {
     ErrorWrongClientId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerType {
     TextServer,
     MediaServer,

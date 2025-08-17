@@ -277,6 +277,8 @@ impl RoutingHandler {
     }
 
     /// Send a packet to the first hop in its route
+    /// # Errors
+    /// Returns an error if send fails
     fn send_packet_to_first_hop(&self, packet: Packet) -> Result<(), NetworkError> {
         if packet.routing_header.hops.len() > 1 {
             let first_hop = packet.routing_header.hops[1];

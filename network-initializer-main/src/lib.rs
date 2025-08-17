@@ -1,5 +1,7 @@
 mod errors;
+pub mod network_initializer;
 mod parser;
+#[macro_use]
 mod utils;
 
 #[cfg(test)]
@@ -8,10 +10,12 @@ mod tests {
     // TODO: "Implement more test for parse and validation logic"
 
     use super::*;
+    use crate::errors::ConfigError;
+    use crate::network_initializer::NetworkInitializer;
+    use crate::network_initializer::Uninitialized;
     use crate::parser::Parse;
     use crate::parser::Validate;
     use wg_internal::config::Config;
-    use crate::errors::ConfigError;
 
     #[test]
     fn test_parse_config() {
@@ -43,6 +47,19 @@ mod tests {
     fn test_invalid_node_connection() {
         let config = Config::parse_config("./tests/invalid_node_connection1.toml").unwrap();
         let validation = config.validate_config();
-        assert_eq!(validation, Err(ConfigError::InvalidNodeConnection("Drone 3 cannot be connected to itself".to_string())));
+        assert_eq!(
+            validation,
+            Err(ConfigError::InvalidNodeConnection(
+                "Drone 3 cannot be connected to itself".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_network_initializer() {
+        let net_init = NetworkInitializer::<Uninitialized>::new("./tests/correct_config.toml");
+        let _net_init = net_init.initialize();
+
+        println!("Initialized!")
     }
 }

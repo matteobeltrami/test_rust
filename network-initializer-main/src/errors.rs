@@ -1,4 +1,3 @@
-use clap::Parser;
 
 #[derive(Debug)]
 pub enum ConfigError {

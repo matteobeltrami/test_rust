@@ -1,0 +1,67 @@
+use crate::{network::NetworkError, FragmentAssembler, RoutingHandler};
+use std::any::Any;
+
+use crossbeam_channel::{select_biased, Receiver};
+use wg_internal::packet::{Packet, PacketType};
+
+pub trait Processor {
+    fn controller_recv(&self) -> &Receiver<Box<dyn Any>>;
+    fn packet_recv(&self) -> &Receiver<Packet>;
+    fn assembler(&mut self) -> &mut FragmentAssembler;
+    fn routing_header(&mut self) -> &mut RoutingHandler;
+
+    fn handle_msg(&mut self, msg: Vec<u8>);
+    fn handle_command(&mut self, cmd: Box<dyn Any>);
+
+    /// Handles a packet in a standard way
+    /// # Errors
+    /// returns an Errors if handling fails
+    fn handle_packet(&mut self, pkt: Packet) -> Result<(), NetworkError> {
+        let router = self.routing_header();
+        match pkt.pack_type {
+            PacketType::MsgFragment(fragment) => {
+                if let Some(msg) = self.assembler().add_fragment(
+                    fragment,
+                    pkt.session_id,
+                    pkt.routing_header.hops[0],
+                ) {
+                    self.handle_msg(msg);
+                }
+            }
+            PacketType::Ack(ack) => {
+                router.handle_ack(&ack, pkt.session_id, pkt.routing_header.hops[0]);
+            }
+            PacketType::Nack(nack) => {
+                router.handle_nack(&nack, pkt.session_id, pkt.routing_header.hops[0])?;
+            }
+            PacketType::FloodRequest(flood_request) => {
+                router.handle_flood_request(flood_request, pkt.session_id)?;
+            }
+            PacketType::FloodResponse(flood_response) => {
+                router.handle_flood_response(&flood_response);
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self) {
+        loop {
+            select_biased! {
+                recv(self.controller_recv()) -> cmd => {
+                    if let Ok(cmd) = cmd {
+                        self.handle_command(cmd);
+                    }
+                }
+
+                recv(self.packet_recv()) -> pkt => {
+                    if let Ok(pkt) = pkt {
+                        match self.handle_packet(pkt) {
+                            Ok(()) => {},
+                            Err(_) => return
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,26 +1,31 @@
-use tokio::sync::{oneshot, RwLock};
-use wg_internal::network::SourceRoutingHeader;
-use wg_internal::{network::NodeId, packet::Packet};
-use wg_internal::packet::{FloodRequest, NodeType, PacketType};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use crate::types::{ PendingQueue, SendingMap };
-
-
+use crossbeam_channel::SendError;
+use wg_internal::network::NodeId;
+use wg_internal::packet::NodeType;
+use std::{collections::{HashMap, HashSet, VecDeque}, fmt::Display};
 
 #[derive(Debug)]
 pub enum NetworkError {
     TopologyError,
-    PathNotFound,
-    NodeNotFound,
+    PathNotFound(u8),
+    NodeNotFound(u8),
+    NodeIsNotANeighbor(u8),
+    SendError(String),
+    ControllerDisconnected,
+    NoDestination,
+    NoNeighborAssigned
 }
 
-impl std::fmt::Display for NetworkError {
+impl Display for NetworkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NetworkError::TopologyError => write!(f, "Topology error"),
-            NetworkError::PathNotFound => write!(f, "Path not found"),
-            NetworkError::NodeNotFound => write!(f, "Node not found"),
+            Self::TopologyError => write!(f, "Topology error"),
+            Self::PathNotFound(id) => write!(f, "Path not found for node {id}"),
+            Self::NodeNotFound(id) => write!(f, "Node {id} not found"),
+            Self::NodeIsNotANeighbor(id) => write!(f, "Node {id} is not a neighbor"),
+            Self::SendError(msg) => write!(f, "Send error: {msg}"),
+            Self::ControllerDisconnected => write!(f, "Controller disconnected"),
+            Self::NoDestination => write!(f, "Packet has no destination specified"),
+            Self::NoNeighborAssigned => write!(f, "No neighbor assigned"),
         }
     }
 }
@@ -28,15 +33,25 @@ impl std::fmt::Display for NetworkError {
 impl std::error::Error for NetworkError {}
 
 
-pub struct Node {
-    id: NodeId,
-    node_type: NodeType,
+impl<T: Send + std::fmt::Debug> From<SendError<T>> for NetworkError {
+    fn from(value: SendError<T>) -> Self {
+        NetworkError::SendError(format!("{value:?}"))
+    }
+}
+
+
+#[derive(Clone)]
+pub(crate) struct Node {
+    pub id: NodeId,
+    kind: NodeType,
     adjacents: Vec<NodeId>
 }
 
+
 impl Node {
-    pub fn new(id: NodeId, node_type: NodeType, adjacents: Vec<NodeId>) -> Self {
-        Self { id, node_type, adjacents }
+    #[must_use]
+    pub fn new(id: NodeId, kind: NodeType, adjacents: Vec<NodeId>) -> Self {
+        Self { id, kind, adjacents }
     }
 
     pub fn get_id(&self) -> NodeId {
@@ -44,9 +59,10 @@ impl Node {
     }
 
     pub fn get_node_type(&self) -> NodeType {
-        self.node_type.clone()
+        self.kind
     }
 
+    #[must_use]
     pub fn get_adjacents(&self) -> &Vec<NodeId> {
         &self.adjacents
     }
@@ -56,8 +72,9 @@ impl Node {
     }
 
     pub fn remove_adjacent(&mut self, adj: NodeId) {
-        let index_to_remove = self.adjacents.iter().position(|i| *i == adj).expect(&format!("Node with id {} not found in {} adjacents", adj, self.id));
-        let _ = self.adjacents.remove(index_to_remove);
+        if let Some(index_to_remove) = self.adjacents.iter().position(|i| *i == adj) {
+            let _ = self.adjacents.remove(index_to_remove);
+        }
     }
 }
 
@@ -67,53 +84,50 @@ impl std::fmt::Debug for Node{
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Network {
-    pub nodes: Vec<Node>
+    pub(crate) nodes: Vec<Node>
 }
 
 impl Network {
-    pub fn new(root: Node) -> Self {
-        let mut nodes = vec![];
-        nodes.push(root);
+    #[must_use]
+    pub(crate) fn new(root: Node) -> Self {
+        let nodes = vec![root];
         Self { nodes }
     }
 
-    pub fn add_node(&mut self, new_node: Node) -> Result<(), NetworkError> {
+
+    pub(crate) fn add_node(&mut self, new_node: Node) {
         for adj in new_node.get_adjacents() {
-            if let Some(node) = self.nodes.iter_mut().find(|n| n.get_id() == *adj) {
+            if let Some(node) = self.nodes.iter_mut().find(|n| n.id == *adj) {
                 match (new_node.get_node_type(), node.get_node_type()) {
-                    (_, NodeType::Drone) => {
+                    (_, NodeType::Drone) | (NodeType::Drone, _) => {
                         node.add_adjacent(*adj);
                     }
-                    _ => {
-                        return Err(NetworkError::TopologyError);
-                    }
+                    _ => {}
                 }
             }
         }
 
         self.nodes.push(new_node);
-        Ok(())
     }
 
-    pub fn remove_node(&mut self, node_id: NodeId) -> Result<(), NetworkError> {
-        if let Some(_) = self.nodes.iter().find(|n| n.get_id() == node_id) {
-            for n in self.nodes.iter_mut() {
-                if n.get_adjacents().contains(&node_id){
-                    n.remove_adjacent(node_id);
-                }
+    pub(crate) fn remove_node(&mut self, node_id: NodeId) {
+        for n in &mut self.nodes{
+            if n.get_adjacents().contains(&node_id){
+                n.remove_adjacent(node_id);
             }
-            let index_to_remove = self.nodes.iter().position(|n| n.get_id() == node_id).expect(&format!("Node {} is not a node of the network", node_id));
+        }
+        if let Some(index_to_remove) = self.nodes.iter().position(|n| n.id == node_id) {
             let _ = self.nodes.remove(index_to_remove);
-            return Ok(());
-        } else {
-            return Err(NetworkError::NodeNotFound);
         }
     }
 
-    pub fn update_node(&mut self, node_id: NodeId, adjacents: Vec<NodeId>) -> Result<(), NetworkError> {
-        if let Some(node) = self.nodes.iter_mut().find(|n| n.get_id() == node_id) {
+    /// Updates the node's adjacents with the provided list.
+    /// # Errors
+    /// If the node is not found, returns an error.
+    pub(crate) fn update_node(&mut self, node_id: NodeId, adjacents: Vec<NodeId>) -> Result<(), NetworkError> {
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) {
             for adj in adjacents {
                 if !node.get_adjacents().contains(&adj) {
                     node.add_adjacent(adj);
@@ -124,12 +138,18 @@ impl Network {
             // automatically by the protocol
 
             return Ok(());
-        } else {
-            return Err(NetworkError::NodeNotFound);
+        }
+        Err(NetworkError::NodeNotFound(node_id))
+    }
+
+    pub(crate) fn change_node_type(&mut self, id: NodeId, new_type: NodeType) {
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.get_id() == id) {
+                node.kind = new_type;
         }
     }
 
-    pub fn find_path(&self, destination: NodeId) -> Result<Vec<NodeId>, NetworkError> {
+    #[must_use]
+    pub(crate) fn find_path(&self, destination: NodeId) -> Option<Vec<NodeId>> {
         let start = self.nodes[0].id;
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
@@ -147,11 +167,11 @@ impl Network {
                     current = parent;
                 }
                 path.reverse();
-                return Ok(path);
+                return Some(path);
             }
 
-            if let Some(node) = self.nodes.iter().find(|n| n.get_id() == current) {
-                for neighbor in node.get_adjacents().iter() {
+            if let Some(node) = self.nodes.iter().find(|n| n.id == current) {
+                for neighbor in node.get_adjacents() {
                     if !visited.contains(neighbor) {
                         visited.insert(*neighbor);
                         parent_map.insert(neighbor, current);
@@ -160,71 +180,91 @@ impl Network {
                 }
             }
         }
-        Err(NetworkError::PathNotFound)
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_node() {
+        let root = Node::new(1, NodeType::Client, vec![2, 3]);
+        let mut network = Network::new(root);
+
+        let new_node = Node::new(2, NodeType::Client, vec![1]);
+        network.add_node(new_node);
+
+        assert_eq!(network.nodes.len(), 2);
+        assert!(network.nodes.iter().any(|n| n.id == 2));
     }
 
-    pub fn discover(topology: Arc<RwLock<Self>>, client_id: NodeId, neighbors: SendingMap, flood_id: u64, session_id: u64, queue: PendingQueue) -> tokio::task::JoinHandle<()> {
-        tokio::task::spawn(async move {
-            for (id, sender) in neighbors.write().await.iter_mut() {
-                match sender.send(
-                    Packet::new_flood_request(
-                        SourceRoutingHeader::empty_route(),
-                        session_id,
-                        FloodRequest::new(flood_id, client_id )
-                    )
-                ) {
-                    Ok(_) => {
-                        let (tx, rx) = oneshot::channel();
+    #[test]
+    fn test_remove_node() {
+        let root = Node::new(1, NodeType::Client, vec![2, 3]);
+        let mut network = Network::new(root);
 
-                        {
-                            let mut lock = queue.lock().await;
-                            lock.insert(session_id, tx);
-                        }
+        let new_node = Node::new(2, NodeType::Client, vec![1]);
+        network.add_node(new_node);
 
-                        let packet = rx.await.expect("Cannot receive from oneshot channel");
+        network.remove_node(2);
 
-                        {
-                            let mut lock = queue.lock().await;
-                            lock.remove(&session_id);
-                        }
+        assert_eq!(network.nodes.len(), 1);
+        assert!(!network.nodes.iter().any(|n| n.id == 2));
+    }
 
-                        match packet {
-                            PacketType::FloodResponse(flood_response) => {
-                                let neighbors = flood_response.path_trace
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, &(node_id, node_type))| {
-                                        let mut neigh = Vec::new();
+    #[test]
+    fn test_update_node() {
+        let root = Node::new(1, NodeType::Client, vec![2]);
+        let mut network = Network::new(root);
 
-                                        if i > 0 {
-                                            neigh.push(flood_response.path_trace[i - 1]);
-                                        }
+        let new_node = Node::new(2, NodeType::Client, vec![1]);
+        network.add_node(new_node);
 
-                                        if i + 1 < flood_response.path_trace.len() {
-                                            neigh.push(flood_response.path_trace[i + 1]);
-                                        }
+        network.update_node(1, vec![3]).unwrap();
 
-                                        ((node_id, node_type), neigh)
-                                    })
-                                .collect::<Vec<_>>();
+        assert!(network.nodes[0].get_adjacents().contains(&3));
+    }
 
-                                for (node, neighbors) in neighbors.iter() {
-                                    let (id, node_type) = node;
-                                    let neigh_ids: Vec<u8> = neighbors.iter().map(|(n_id, _)| *n_id).collect();
-                                    match topology.write().await.update_node(*id, neigh_ids.clone()) {
-                                        Ok(_) => {},
-                                        Err(_) => {
-                                            let _ = topology.write().await.add_node(Node::new(*id, *node_type, neigh_ids));
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    Err(_) => eprintln!("Failed to send message to {}", id),
-                }
-            }
-        })
+    #[test]
+    fn test_change_node_type() {
+        let root = Node::new(1, NodeType::Client, vec![2]);
+        let mut network = Network::new(root);
+
+        network.change_node_type(1, NodeType::Drone);
+
+        assert_eq!(network.nodes[0].get_node_type(), NodeType::Drone);
+    }
+
+    #[test]
+    fn test_find_path() {
+        let root = Node::new(1, NodeType::Client, vec![2, 3]);
+        let mut network = Network::new(root);
+
+        let node2 = Node::new(2, NodeType::Client, vec![1, 4]);
+        let node3 = Node::new(3, NodeType::Client, vec![1]);
+        let node4 = Node::new(4, NodeType::Client, vec![2]);
+
+        network.add_node(node2);
+        network.add_node(node3);
+        network.add_node(node4);
+
+        let path = network.find_path(4).unwrap();
+
+        assert_eq!(path, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn test_find_path_not_found() {
+        let root = Node::new(1, NodeType::Client, vec![2]);
+        let mut network = Network::new(root);
+
+        let node2 = Node::new(2, NodeType::Client, vec![1]);
+        network.add_node(node2);
+
+        let result = network.find_path(3);
+
+        assert!(result.is_none());
     }
 }

@@ -1,14 +1,10 @@
 use std::{collections::HashMap, str::FromStr};
 use std::fmt::Display;
-
-
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use wg_internal::{network::NodeId, packet::Packet};
 use crossbeam_channel::Sender;
 use uuid::Uuid;
-
-
 pub type Bytes = Vec<u8>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -56,9 +52,9 @@ impl FromStr for MediaReference {
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct TextFile{
     pub id: Uuid,
-    title: String,
-    content: String,
-    media_refs: Vec<MediaReference>
+    pub title: String,
+    pub content: String,
+    pub media_refs: Vec<MediaReference>
 }
 
 
@@ -89,10 +85,41 @@ impl TextFile {
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct MediaFile {
     pub id: Uuid,
-    title: String,
-    content: Vec<Bytes>,
+    pub title: String,
+    pub content: Vec<Bytes>,
 }
 
+impl MediaFile {
+    pub fn new(title: String, content: Vec<Bytes>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            title,
+            content,
+        }
+    }
+
+    pub fn from_u8(filename: String, data: Vec<u8>) -> Self {
+        let chunk_size = 1024;
+        let content: Vec<Bytes> = data
+            .chunks(chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+
+        Self::new(filename, content)
+    }
+
+    pub fn get_title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn get_content(&self) -> &Vec<Bytes> {
+        &self.content
+    }
+
+    pub fn get_size(&self) -> usize {
+        self.content.iter().map(|chunk| chunk.len()).sum()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct File {
@@ -214,7 +241,6 @@ pub enum ChatEvent {
     MessageReceived(Message)
 }
 
-
 #[derive(Debug, Clone)]
 pub enum WebCommand {
     GetCachedFiles,
@@ -223,6 +249,12 @@ pub enum WebCommand {
     GetTextFile(Uuid),
     GetMediaFiles,
     GetMediaFile(Uuid),
+    AddTextFile(TextFile),
+    AddTextFileFromPath(String),
+    AddMediaFile(MediaFile),
+    AddMediaFileFromPath(String),
+    RemoveTextFile(Uuid),
+    RemoveMediaFile(Uuid),
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +266,11 @@ pub enum WebEvent {
     MediaFiles(Vec<MediaFile>),
     MediaFile(MediaFile),
     FileNotFound(Uuid),
+    TextFileAdded(Uuid),
+    MediaFileAdded(Uuid),
+    TextFileRemoved(Uuid),
+    MediaFileRemoved(Uuid),
+    FileOperationError(String),
 }
 
 
@@ -243,7 +280,6 @@ pub enum NodeEvent {
     FloodStarted(u64, NodeId),
     NodeRemoved(NodeId)
 }
-
 
 #[derive(Debug, Clone)]
 pub enum NodeCommand {
@@ -278,4 +314,33 @@ pub enum ServerType {
     ChatServer,
     TextServer,
     MediaServer,
+}
+
+pub mod file_conversion {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    pub fn file_to_media_file(file_path: &str) -> Result<MediaFile, Box<dyn std::error::Error>> {
+        let filename = Path::new(file_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let data = fs::read(file_path.to_string())?;
+        Ok(MediaFile::from_u8(filename, data))
+    }
+
+    pub fn file_to_text_file(file_path: &str) -> Result<TextFile, Box<dyn std::error::Error>> {
+        let filename = Path::new(file_path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let content = fs::read_to_string(file_path.to_string())?;
+
+        Ok(TextFile::new(filename, content, vec![]))
+    }
 }

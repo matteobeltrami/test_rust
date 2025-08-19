@@ -202,6 +202,10 @@ impl Processor for WebBrowser {
                         }
                     }
                 }
+                _ => {
+                    eprintln!("Unsupported command: {:?}", cmd);
+                    todo!()
+                }
             }
         }
 

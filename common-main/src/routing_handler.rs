@@ -266,12 +266,7 @@ impl RoutingHandler {
             NackType::UnexpectedRecipient(_) => todo!(),
         }
 
-        if let Some(packet) =
-            self.buffer
-                .get_fragment_by_id(session_id, nack.fragment_index, source_id)
-        {
-            self.try_send(packet)?;
-        }
+        self.retry_send(session_id, nack.fragment_index, source_id)?;
 
         Ok(())
     }
@@ -341,7 +336,6 @@ impl RoutingHandler {
         destination: NodeId,
         session_id: Option<u64>,
     ) -> Result<(), NetworkError> {
-        // devo inviare con lo stesso session_id del packetto o con il mio??????????
         let chunks: Vec<&[u8]> = message.chunks(128).collect();
         let total_n_fragments = chunks.len();
 
@@ -375,7 +369,11 @@ impl RoutingHandler {
 
             self.try_send(packet.clone())?;
             let session_id = packet.session_id;
-            self.buffer.insert(packet, session_id, self.id);
+            self.buffer.insert(
+                packet,
+                session_id,
+                self.id
+            );
         }
 
         Ok(())
@@ -418,6 +416,11 @@ impl RoutingHandler {
         self.try_send(packet)?;
         Ok(())
     }
+
+    #[must_use]
+    pub fn get_servers(&self) -> Option<Vec<NodeId>> {
+        self.network_view.get_servers()
+    }
 }
 
 #[cfg(test)]
@@ -452,25 +455,29 @@ mod tests {
         assert!(!handler.network_view.nodes[0].get_adjacents().contains(&2));
     }
 
-    // #[test]
-    // fn test_start_flood() {
-    //     let (sender, receiver) = unbounded();
-    //     let mut handler = RoutingHandler::new(1, NodeType::Client, HashMap::new(), sender);
-    //
-    //     let (neighbor_sender, neighbor_receiver) = unbounded();
-    //     handler.add_neighbor(2, neighbor_sender);
-    //
-    //     handler.start_flood().unwrap();
-    //
-    //     let packet = receiver.try_recv().unwrap();
-    //     assert!(matches!(packet.try_into().unwrap(), NodeEvent::FloodStarted(_, _)));
-    //
-    //     let neighbor_packet = neighbor_receiver.try_recv().unwrap();
-    //     assert!(matches!(
-    //         neighbor_packet.pack_type,
-    //         PacketType::FloodRequest(_)
-    //     ));
-    // }
+    #[test]
+    fn test_start_flood() {
+        let (sender, receiver) = unbounded();
+        let mut handler = RoutingHandler::new(1, NodeType::Client, HashMap::new(), sender);
+
+        let (neighbor_sender, neighbor_receiver) = unbounded();
+        handler.add_neighbor(2, neighbor_sender);
+
+        handler.start_flood().unwrap();
+
+        let packet = receiver.try_recv().unwrap();
+        if let Ok(cmd) = packet.downcast::<NodeEvent>() {
+
+            assert!(matches!(*cmd, NodeEvent::FloodStarted(_, _)));
+
+        }
+
+        let neighbor_packet = neighbor_receiver.try_recv().unwrap();
+        assert!(matches!(
+            neighbor_packet.pack_type,
+            PacketType::FloodRequest(_)
+        ));
+    }
 
     #[test]
     fn test_handle_flood_response() {
@@ -505,22 +512,22 @@ mod tests {
         assert!(matches!(packet.pack_type, PacketType::MsgFragment(_)));
     }
 
-    // #[test]
-    // fn test_handle_ack() {
-    //     let (sender, _receiver) = unbounded();
-    //     let mut handler = RoutingHandler::new(1, NodeType::Client, HashMap::new(), sender);
-    //
-    //     let (neighbor_sender, _neighbor_receiver) = unbounded();
-    //     handler.add_neighbor(2, neighbor_sender);
-    //
-    //     let message = b"Hello, world!".to_vec();
-    //     handler.send_message(&message, 2).unwrap();
-    //
-    //     let ack = Ack {
-    //         fragment_index: 0,
-    //     };
-    //
-    //     handler.handle_ack(&ack, 1, 2);
-    //
-    // }
+    #[test]
+    fn test_handle_ack() {
+        let (sender, _receiver) = unbounded();
+        let mut handler = RoutingHandler::new(1, NodeType::Client, HashMap::new(), sender);
+
+        let (neighbor_sender, _neighbor_receiver) = unbounded();
+        handler.add_neighbor(2, neighbor_sender);
+
+        let message = b"Hello, world!".to_vec();
+        handler.send_message(&message, 2, None).unwrap();
+
+        let ack = Ack {
+            fragment_index: 0,
+        };
+
+        handler.handle_ack(&ack, 1, 2);
+
+    }
 }

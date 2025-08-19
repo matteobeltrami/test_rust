@@ -48,3 +48,4 @@ impl FragmentAssembler {
         None
     }
 }
+

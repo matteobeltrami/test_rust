@@ -254,3 +254,123 @@ impl Processor for WebBrowser {
         }
     }
 }
+
+#[cfg(test)]
+mod web_browser_tests {
+    use super::*;
+    use crossbeam::channel::unbounded;
+    use common::types::{WebResponse, ServerType, TextFile, MediaFile, MediaReference};
+
+    fn create_test_web_browser() -> WebBrowser {
+        let (controller_send, controller_recv) = unbounded();
+        let (_, packet_recv) = unbounded();
+        let neighbors = HashMap::new();
+
+        WebBrowser::new(1, neighbors, packet_recv, controller_recv, controller_send)
+    }
+
+    #[test]
+    /// Tests ServerType response handling (text server being added to HashSet)
+    fn test_server_type_identification() {
+        let mut browser = create_test_web_browser();
+
+        let response = WebResponse::ServerType {
+            server_type: ServerType::TextServer
+        };
+        let serialized = serde_json::to_vec(&response).unwrap();
+        browser.handle_msg(serialized, 5, 100);
+
+        assert!(browser.text_servers.contains_key(&5));
+    }
+
+    #[test]
+    /// Tests TextFilesList response handling (server files list being added to HashSet)
+    fn test_text_files_list_handling() {
+        let mut browser = create_test_web_browser();
+
+        let files = vec![
+            "file1-id:Article 1".to_string(),
+            "file2-id:Article 2".to_string()
+        ];
+        let response = WebResponse::TextFilesList { files };
+        let serialized = serde_json::to_vec(&response).unwrap();
+        browser.handle_msg(serialized, 5, 101);
+
+        let server_files = browser.get_list_files_by_id(5).unwrap();
+        assert_eq!(server_files.len(), 2);
+    }
+
+    #[test]
+    /// Tests TextFile handling and caching
+    fn test_text_file_caching_with_media_refs() {
+        let mut browser = create_test_web_browser();
+
+        let media_ref = MediaReference::new(6);
+        let text_file = TextFile::new(
+            "Article with Media".to_string(),
+            "Content with media ref".to_string(),
+            vec![media_ref]
+        );
+        let serialized_file = serde_json::to_vec(&text_file).unwrap();
+        let response = WebResponse::TextFile {
+            file_data: serialized_file
+        };
+        let serialized = serde_json::to_vec(&response).unwrap();
+        browser.handle_msg(serialized, 5, 102);
+
+        assert!(browser.cached_files.contains_key(&text_file));
+        let cached_files = browser.get_text_files();
+        assert_eq!(cached_files.len(), 1);
+    }
+
+    #[test]
+    /// Tests association between TextFile and Media File in File
+    fn test_media_file_association() {
+        let mut browser = create_test_web_browser();
+
+        let media_ref = MediaReference::new(6);
+        let text_file = TextFile::new(
+            "Article".to_string(),
+            "Content".to_string(),
+            vec![media_ref.clone()]
+        );
+        browser.cached_files.insert(text_file.clone(), vec![]);
+        let media_file = MediaFile {
+            id: media_ref.id,
+            title: "Test Image".to_string(),
+            content: vec![vec![1, 2, 3, 4]]
+        };
+        let serialized_media = serde_json::to_vec(&media_file).unwrap();
+        let response = WebResponse::MediaFile {
+            media_data: serialized_media
+        };
+        let serialized = serde_json::to_vec(&response).unwrap();
+        browser.handle_msg(serialized, 6, 103);
+
+        let files = browser.get_files();
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    /// Tests if different commands do not panick
+    fn test_command_responses() {
+        let mut browser = create_test_web_browser();
+
+        let text_file = TextFile::new("Test".to_string(), "Content".to_string(), vec![]);
+        let file_id = text_file.id;
+        browser.cached_files.insert(text_file, vec![]);
+
+        let commands = vec![
+            WebCommand::GetCachedFiles,
+            WebCommand::GetFile(file_id),
+            WebCommand::GetTextFiles,
+            WebCommand::GetTextFile(file_id),
+            WebCommand::GetMediaFiles,
+        ];
+
+        for cmd in commands {
+            let should_continue = browser.handle_command(Box::new(cmd));
+            assert!(!should_continue);
+        }
+    }
+}

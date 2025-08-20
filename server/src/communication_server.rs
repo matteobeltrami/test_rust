@@ -109,3 +109,65 @@ impl Processor for ChatServer {
     }
 }
 
+mod communication_server_tests {
+    use super::*;
+    use crossbeam::channel::unbounded;
+    use common::types::{ChatRequest};
+
+    fn create_test_chat_server() -> (ChatServer, Receiver<Packet>, Sender<Box<dyn Any>>) {
+        let (controller_send, controller_recv) = unbounded();
+        let (packet_send, packet_recv) = unbounded();
+        let mut neighbors = HashMap::new();
+        neighbors.insert(2, packet_send);
+
+        let server = ChatServer::new(1, neighbors, packet_recv.clone(), controller_recv, controller_send.clone());
+        (server, packet_recv, controller_send)
+    }
+
+    #[test]
+    /// Tests the client registration handling and message forwarding
+    fn test_client_registration_and_message_forwarding() {
+        let (mut server, _, _) = create_test_chat_server();
+
+        let reg_request1 = ChatRequest::RegistrationToChat { client_id: 10 };
+        let reg_request2 = ChatRequest::RegistrationToChat { client_id: 11 };
+
+        server.handle_msg(serde_json::to_vec(&reg_request1).unwrap(), 10, 100);
+        server.handle_msg(serde_json::to_vec(&reg_request2).unwrap(), 11, 101);
+
+        assert_eq!(server.registered_clients.len(), 2);
+        assert!(server.registered_clients.contains(&10));
+        assert!(server.registered_clients.contains(&11));
+
+        let list_request = ChatRequest::ClientListQuery;
+        server.handle_msg(serde_json::to_vec(&list_request).unwrap(), 10, 102);
+
+        let message_request = ChatRequest::MessageFor {
+            client_id: 11,
+            message: "Hello from 10".to_string()
+        };
+        server.handle_msg(serde_json::to_vec(&message_request).unwrap(), 10, 103);
+
+        let invalid_message = ChatRequest::MessageFor {
+            client_id: 99,
+            message: "This should fail".to_string()
+        };
+        server.handle_msg(serde_json::to_vec(&invalid_message).unwrap(), 10, 104);
+    }
+
+    #[test]
+    /// Tests malformed message handling, it shouldn't panick
+    fn test_malformed_message_handling() {
+        let (mut server, _, _) = create_test_chat_server();
+
+        let invalid_json = b"{ invalid json }".to_vec();
+        server.handle_msg(invalid_json, 2, 123);
+
+        let wrong_structure = serde_json::to_vec(&serde_json::json!({
+            "not_a_chat_request": true
+        })).unwrap();
+        server.handle_msg(wrong_structure, 2, 124);
+
+        assert_eq!(server.registered_clients.len(), 0);
+    }
+}

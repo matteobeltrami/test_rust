@@ -229,6 +229,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// Tests adding a node to the network
     fn test_add_node() {
         let root = Node::new(1, NodeType::Client, vec![2, 3]);
         let mut network = Network::new(root);
@@ -241,6 +242,7 @@ mod tests {
     }
 
     #[test]
+    /// Tests removing a node from the network
     fn test_remove_node() {
         let root = Node::new(1, NodeType::Client, vec![2, 3]);
         let mut network = Network::new(root);
@@ -255,6 +257,7 @@ mod tests {
     }
 
     #[test]
+    /// Tests updating a node
     fn test_update_node() {
         let root = Node::new(1, NodeType::Client, vec![2]);
         let mut network = Network::new(root);
@@ -268,6 +271,7 @@ mod tests {
     }
 
     #[test]
+    /// Tests changing the `NodeType` to a node
     fn test_change_node_type() {
         let root = Node::new(1, NodeType::Client, vec![2]);
         let mut network = Network::new(root);
@@ -278,6 +282,7 @@ mod tests {
     }
 
     #[test]
+    /// Tests the `find_path` method
     fn test_find_path() {
         let root = Node::new(1, NodeType::Client, vec![2, 3]);
         let mut network = Network::new(root);
@@ -296,6 +301,7 @@ mod tests {
     }
 
     #[test]
+    /// Tests the `find_path` method with non-existing path
     fn test_find_path_not_found() {
         let root = Node::new(1, NodeType::Client, vec![2]);
         let mut network = Network::new(root);
@@ -306,5 +312,85 @@ mod tests {
         let result = network.find_path(3);
 
         assert!(result.is_none());
+    }
+
+    #[test]
+    /// Tests `find_path` method in a complex network
+    fn test_complex_network_topology() {
+        let root = Node::new(1, NodeType::Client, vec![2, 3]);
+        let mut network = Network::new(root);
+
+        network.add_node(Node::new(2, NodeType::Drone, vec![1, 4, 5]));
+        network.add_node(Node::new(3, NodeType::Drone, vec![1, 6]));
+        network.add_node(Node::new(4, NodeType::Drone, vec![2, 7]));
+        network.add_node(Node::new(5, NodeType::Server, vec![2]));
+        network.add_node(Node::new(6, NodeType::Server, vec![3]));
+        network.add_node(Node::new(7, NodeType::Client, vec![4]));
+
+        let path_to_server5 = network.find_path(5);
+        assert!(path_to_server5.is_some());
+        let path = path_to_server5.unwrap();
+        assert_eq!(path[0], 1);
+        assert_eq!(path[path.len() - 1], 5);
+        let path_to_client7 = network.find_path(7);
+        assert!(path_to_client7.is_some());
+    }
+
+    #[test]
+    /// Tests `find_path` method in a partitioned network
+    fn test_network_partition_handling() {
+        let root = Node::new(1, NodeType::Client, vec![2]);
+        let mut network = Network::new(root);
+
+        network.add_node(Node::new(2, NodeType::Drone, vec![1]));
+        network.add_node(Node::new(3, NodeType::Server, vec![4])); // Isolated
+        network.add_node(Node::new(4, NodeType::Drone, vec![3])); // Isolated
+
+        let path_to_2 = network.find_path(2);
+        assert!(path_to_2.is_some());
+
+        let path_to_3 = network.find_path(3);
+        assert!(path_to_3.is_none());
+    }
+
+    #[test]
+    /// Tests `get_servers` and `get_clients` method in a network
+    fn test_node_type_filtering() {
+        let root = Node::new(1, NodeType::Client, vec![]);
+        let mut network = Network::new(root);
+
+        network.add_node(Node::new(2, NodeType::Server, vec![]));
+        network.add_node(Node::new(3, NodeType::Server, vec![]));
+        network.add_node(Node::new(4, NodeType::Client, vec![]));
+        network.add_node(Node::new(5, NodeType::Drone, vec![]));
+
+        let servers = network.get_servers().unwrap();
+        assert_eq!(servers.len(), 2);
+        assert!(servers.contains(&2));
+        assert!(servers.contains(&3));
+
+        let clients = network.get_clients().unwrap();
+        assert_eq!(clients.len(), 2);
+        assert!(clients.contains(&1));
+        assert!(clients.contains(&4));
+    }
+
+    #[test]
+    fn test_dynamic_network_updates() {
+        let root = Node::new(1, NodeType::Client, vec![2]);
+        let mut network = Network::new(root);
+
+        network.add_node(Node::new(2, NodeType::Drone, vec![1, 3]));
+        network.add_node(Node::new(3, NodeType::Server, vec![2]));
+
+        network.update_node(1, vec![4]).unwrap();
+        network.add_node(Node::new(4, NodeType::Drone, vec![1]));
+
+        let path = network.find_path(3);
+        assert!(path.is_some());
+
+        network.remove_node(2);
+        let path_after_removal = network.find_path(3);
+        assert!(path_after_removal.is_none());
     }
 }

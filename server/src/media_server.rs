@@ -1,20 +1,19 @@
-use std::any::Any;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use crossbeam::channel::{Receiver, Sender};
-use uuid::{Uuid};
+use uuid::Uuid;
 use wg_internal::network::NodeId;
 use wg_internal::packet::{NodeType, Packet};
 use common::{FragmentAssembler, RoutingHandler};
 use common::packet_processor::Processor;
-use common::types::{MediaFile, NodeCommand, ServerType, WebCommand, WebEvent, WebRequest, WebResponse};
+use common::types::{Command, Event, MediaFile, NodeCommand, ServerType, WebCommand, WebEvent, WebRequest, WebResponse};
 use common::file_conversion;
 
 pub struct MediaServer {
     routing_handler: RoutingHandler,
-    controller_recv: Receiver<Box<dyn Any>>,
-    controller_send: Sender<Box<dyn Any>>,
+    controller_recv: Receiver<Box<dyn Command>>,
+    controller_send: Sender<Box<dyn Event>>,
     packet_recv: Receiver<Packet>,
-    id: NodeId,
+    _id: NodeId,
     assembler: FragmentAssembler,
     stored_media: HashMap<Uuid, MediaFile>,
 }
@@ -24,8 +23,8 @@ impl MediaServer {
         id: NodeId,
         neighbors: HashMap<NodeId, Sender<Packet>>,
         packet_recv: Receiver<Packet>,
-        controller_recv: Receiver<Box<dyn Any>>,
-        controller_send: Sender<Box<dyn Any>>
+        controller_recv: Receiver<Box<dyn Command>>,
+        controller_send: Sender<Box<dyn Event>>
     ) -> Self {
         let router = RoutingHandler::new(id, NodeType::Server, neighbors, controller_send.clone());
         Self {
@@ -33,7 +32,7 @@ impl MediaServer {
             controller_recv,
             controller_send,
             packet_recv,
-            id,
+            _id: id,
             assembler: FragmentAssembler::default(),
             stored_media: HashMap::new(),
         }
@@ -64,7 +63,7 @@ impl MediaServer {
 }
 
 impl Processor for MediaServer {
-    fn controller_recv(&self) -> &Receiver<Box<dyn Any>> {
+    fn controller_recv(&self) -> &Receiver<Box<dyn Command>> {
         &self.controller_recv
     }
 
@@ -119,7 +118,8 @@ impl Processor for MediaServer {
         }
     }
 
-    fn handle_command(&mut self, cmd: Box<dyn Any>) -> bool {
+    fn handle_command(&mut self, cmd: Box<dyn Command>) -> bool {
+        let cmd = cmd.into_any();
         if let Some(cmd) = cmd.downcast_ref::<NodeCommand>() {
             match cmd {
                 NodeCommand::AddSender(node_id, sender) => self.routing_handler.add_neighbor(*node_id, sender.clone()),
@@ -137,8 +137,8 @@ impl Processor for MediaServer {
                         return true;
                     }
                 }
-                WebCommand::GetMediaFile(uuid) => {
-                    if let Some(media_file) = self.get_media_by_id(*uuid) {
+                WebCommand::GetMediaFile{media_id, location: _location} => {
+                    if let Some(media_file) = self.get_media_by_id(*media_id) {
                         if self.controller_send
                             .send(Box::new(WebEvent::MediaFile(media_file.clone())))
                             .is_err()
@@ -240,20 +240,22 @@ mod media_server_tests {
     #[test]
     fn test_media_server_creation() {
         let (controller_send, controller_recv) = unbounded();
+        let (event_send, _event_recv) = unbounded::<Box<dyn Event>>();
         let (_, packet_recv) = unbounded();
 
-        let server = MediaServer::new(1, HashMap::new(), packet_recv, controller_recv, controller_send);
+        let server = MediaServer::new(1, HashMap::new(), packet_recv, controller_recv, event_send);
 
-        assert_eq!(server.id, 1);
+        assert_eq!(server._id, 1);
         assert!(server.stored_media.is_empty());
     }
 
     #[test]
     fn test_get_media_list() {
         let (controller_send, controller_recv) = unbounded();
+        let (event_send, _event_recv) = unbounded::<Box<dyn Event>>();
         let (_, packet_recv) = unbounded();
 
-        let mut server = MediaServer::new(1, HashMap::new(), packet_recv, controller_recv, controller_send);
+        let mut server = MediaServer::new(1, HashMap::new(), packet_recv, controller_recv, event_send);
         let test_media = MediaFile::new(
             "test_image.png".to_string(),
             vec![vec![0x89, 0x50, 0x4E, 0x47]]
@@ -268,9 +270,10 @@ mod media_server_tests {
     #[test]
     fn test_add_and_retrieve_media() {
         let (controller_send, controller_recv) = unbounded();
+        let (event_send, _event_recv) = unbounded::<Box<dyn Event>>();
         let (_, packet_recv) = unbounded();
 
-        let mut server = MediaServer::new(1, HashMap::new(), packet_recv, controller_recv, controller_send);
+        let mut server = MediaServer::new(1, HashMap::new(), packet_recv, controller_recv, event_send);
 
         let test_media = MediaFile::new(
             "test_image.png".to_string(),

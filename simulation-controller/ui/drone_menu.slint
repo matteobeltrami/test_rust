@@ -1,0 +1,142 @@
+import { Palette } from "palette.slint";
+
+export component DroneMenu {
+
+    in property <string> drone;
+    in property <string> id;
+    
+    callback remove_node(input: string);
+    callback crash_node(input: string);
+
+    width: 1280px;
+    height: 720px;
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Rectangle {
+        background: black;
+        opacity: 0.75;
+    }
+
+    Rectangle {
+
+        width: 480px;
+        height: 200px;
+
+        background: Palette.bg;
+
+        VerticalLayout {
+            HorizontalLayout {
+                padding: 16px;
+
+
+                Text {
+                    text: "Manage Drone";
+                    font-size: 18px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                    horizontal-stretch: 1; 
+                }
+
+                Rectangle {
+                    height: 32px;
+                    width: 32px;
+                    background: area1.has-hover ? #e05244 : Palette.red;
+
+                    area1 := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.visible = false; }
+                    }
+
+                    VerticalLayout {
+                        Image {
+                            source: @image-url("../assets/images/icons/close.png");
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: @tr("Pick what to do with {0}.", root.drone);
+                font-size: 16px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+
+            HorizontalLayout {
+                Rectangle {
+                    horizontal-stretch: 1;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        alignment: end;
+
+                        Rectangle {
+                            height: 48px;
+
+                            area2 := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+
+                                clicked => {
+                                    root.remove_node(root.id);
+                                    root.visible = false;
+                                }
+                            }
+
+                            background: area2.has-hover ? Palette.bg_highlight : Palette.bg_alt;
+
+                            VerticalLayout {
+                                Text {
+                                    text: "Remove Drone";
+                                    font-size: 16px;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        alignment: end;
+
+                        Rectangle {
+                            height: 48px;
+
+                            area3 := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+
+                                clicked => {
+                                    root.crash_node(root.id);
+                                    root.visible = false;
+                                }
+                            }
+
+                            background: area3.has-hover ? Palette.bg_highlight : Palette.bg_alt;
+
+                            VerticalLayout {
+                                Text {
+                                    text: "Crash Drone";
+                                    font-size: 16px;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

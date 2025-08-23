@@ -5,12 +5,14 @@ use common::network::NetworkError;
 pub enum ClientError {
     NetworkError(NetworkError),
     FragmentationError(String),
-    SerializationError(String),
     ProtocolError(String),
     TimeoutError,
     UnknownServer,
     InvalidResponse,
-    InvalidClient
+    InvalidClient,
+    NoLocationError,
+    SerializationError,
+    UuidParseError,
 }
 
 impl std::fmt::Display for ClientError {
@@ -18,12 +20,14 @@ impl std::fmt::Display for ClientError {
         match self {
             ClientError::NetworkError(msg) => write!(f, "Net ork error: {msg}"),
             ClientError::FragmentationError(msg) => write!(f, "Fragmentation error: {msg}"),
-            ClientError::SerializationError(msg) => write!(f, "Serialization error: {msg}"),
             ClientError::ProtocolError(msg) => write!(f, "Protocol error: {msg}"),
             ClientError::TimeoutError => write!(f, "Operation timed out"),
             ClientError::UnknownServer => write!(f, "Unknown server"),
             ClientError::InvalidResponse => write!(f, "Invalid response from server"),
             ClientError::InvalidClient => write!(f, "Invalid client, missing attributes"),
+            ClientError::NoLocationError => write!(f, "No location information available"),
+            ClientError::UuidParseError => write!(f, "Failed to parse UUID"),
+            ClientError::SerializationError => write!(f, "Serialization error"),
         }
     }
 }

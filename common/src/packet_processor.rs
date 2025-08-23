@@ -1,17 +1,16 @@
-use crate::{network::NetworkError, FragmentAssembler, RoutingHandler};
-use std::any::Any;
+use crate::{network::NetworkError, types::Command, FragmentAssembler, RoutingHandler};
 
 use crossbeam_channel::{select_biased, Receiver};
 use wg_internal::{network::NodeId, packet::{Packet, PacketType}};
 
-pub trait Processor {
-    fn controller_recv(&self) -> &Receiver<Box<dyn Any>>;
+pub trait Processor: Send {
+    fn controller_recv(&self) -> &Receiver<Box<dyn Command>>;
     fn packet_recv(&self) -> &Receiver<Packet>;
     fn assembler(&mut self) -> &mut FragmentAssembler;
     fn routing_handler(&mut self) -> &mut RoutingHandler;
 
     fn handle_msg(&mut self, msg: Vec<u8>, from: NodeId, session_id: u64);
-    fn handle_command(&mut self, cmd: Box<dyn Any>) -> bool;
+    fn handle_command(&mut self, cmd: Box<dyn Command>) -> bool;
 
     /// Handles a packet in a standard way
     /// # Errors
@@ -42,7 +41,7 @@ pub trait Processor {
                 router.handle_flood_request(flood_request, pkt.session_id)?;
             }
             PacketType::FloodResponse(flood_response) => {
-                router.handle_flood_response(&flood_response);
+                let _ = router.handle_flood_response(&flood_response);
             }
         }
         Ok(())
@@ -54,7 +53,7 @@ pub trait Processor {
                 recv(self.controller_recv()) -> cmd => {
                     if let Ok(cmd) = cmd {
                         if self.handle_command(cmd) {
-                            return
+                            std::process::exit(0);
                         }
                     }
                 }
@@ -62,7 +61,7 @@ pub trait Processor {
                 recv(self.packet_recv()) -> pkt => {
                     if let Ok(pkt) = pkt {
                         if self.handle_packet(pkt).is_err() {
-                            return
+                            std::process::exit(0);
                         }
                     }
                 }

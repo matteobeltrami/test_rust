@@ -1,0 +1,287 @@
+import "../assets/fonts/Satoshi-Regular.ttf";
+
+import { Palette } from "palette.slint";
+
+import { ListItem } from "list_item.slint";
+import { Button } from "button.slint";
+import { DroneMenu } from "drone_menu.slint";
+import { PDRMenu } from "pdr_menu.slint";
+import { AddSenderMenu } from "add_sender_menu.slint";
+
+export struct Drone {
+    title: string,
+    id: string,
+}
+
+export struct Client {
+    title: string,
+    subtitle: string,
+    id: string,
+}
+
+export struct Server {
+    title: string,
+    id: string,
+}
+
+export component MainWindow inherits Window {
+    in property <[Drone]> drones;
+    in property <[Client]> clients;
+    in property <[Server]> servers;
+
+    in property <image> graph_image: @image-url("../assets/images/placeholder.png");
+    in property <string> initial_pdr;
+
+    in property <[string]> logs;
+
+    callback validate_pdr(input: string, current: string) -> string;
+    callback validate_node_id(input: string);
+
+    callback remove_node(input: string);
+    callback crash_node(input: string);
+
+    callback add_log(input: string);
+    
+    width: 1280px;
+    height: 720px;
+    default-font-family: "Satoshi";
+    background: Palette.bg_alt;
+
+    VerticalLayout {
+
+        Rectangle {
+            height: 64px;
+            width: parent.width;
+            background: Palette.bg;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: start;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    Image {
+                        source: @image-url("../assets/images/logo.svg");
+                        width: 196px;
+                        height: 32px;
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.bg_alt; }
+
+        HorizontalLayout {
+            spacing: 1px;
+            
+            //? Nodes column
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                background: Palette.bg;
+                clip: true;
+
+                Flickable {
+                    width: parent.width;
+                    height: parent.height;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        padding: 16px;
+                        spacing: 8px;
+
+                        alignment: start;
+
+                        Text {
+                            text: "DRONES";
+                            color: Palette.grey;
+                            font-size: 16px;
+                            font-weight: 800;
+                        }
+                        
+                        Rectangle { height: 4px; }
+
+                        for drone[i] in drones : ListItem {
+                            stripe_color: Palette.orange;
+                            title: drone.title;
+                            subtitle: "";
+                            id: drone.id;
+                            row_height: 48px;
+
+                            mouse_click => {
+                                droneMenu.drone = self.title;
+                                droneMenu.id = self.id;
+                                droneMenu.visible = true;
+                            }
+                        }
+                        
+                        Rectangle { height: 24px; }
+
+                        Text {
+                            text: "CLIENTS";
+                            color: Palette.grey;
+                            font-size: 16px;
+                            font-weight: 800;
+                        }
+
+                        Rectangle { height: 4px; }
+
+                        for client[i] in clients : ListItem {
+                            stripe_color: Palette.green;
+                            title: client.title;
+                            subtitle: client.subtitle;
+                            id: client.id;
+                            row_height: 64px;
+                        }
+                        
+                        Rectangle { height: 24px; }
+
+                        Text {
+                            text: "SERVERS";
+                            color: Palette.grey;
+                            font-size: 16px;
+                            font-weight: 800;
+                        }
+
+                        Rectangle { height: 4px; }
+
+                        for server[i] in servers : ListItem {
+                            stripe_color: Palette.purple;
+                            title: server.title;
+                            subtitle: "";
+                            id: server.id;
+                            row_height: 48px;
+                        }
+                    }
+                }
+            }
+            
+            //? Graph column
+            Rectangle { 
+                horizontal-stretch: 2; 
+                vertical-stretch: 1; 
+                background: Palette.bg; 
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding: 16px;
+                    alignment: center;
+
+                    Image {
+                        source: root.graph_image;
+                        width: 624px;
+                        height: 624px;
+                    }
+                }
+            }
+
+            //? Commands column
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                background: Palette.bg;
+                clip: true;
+
+                Flickable {
+                    width: parent.width;
+                    height: parent.height;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        padding: 16px;
+                        spacing: 8px;
+
+                        alignment: start;
+
+                        Button {
+                            text: "Add Sender";
+                            clicked => {
+                                addSenderMenu.visible = true;
+                                addSenderMenu.grab_focus();
+                            }
+                        }
+
+                        pdr_button := Button {
+                            text: @tr("Change PDR - {}%", initial_pdr);
+                            clicked => {
+                                pdrMenu.visible = true;
+                                pdrMenu.grab_focus(); 
+                            }
+                        }
+
+                        Rectangle { height: 24px; }
+
+                        Text {
+                            text: "LOGS";
+                            color: Palette.grey;
+                            font-size: 16px;
+                            font-weight: 800;
+                        }
+
+                        Rectangle {
+                            background: Palette.bg;
+                            border-width: 1px;
+                            border-color: Palette.bg_alt;
+
+                            height: 450px;
+
+                            Flickable {
+                                width: parent.width;
+                                height: parent.height;
+                                
+                                VerticalLayout {
+                                    for log[i] in logs : Text {
+                                        text: log;
+                                    }
+                                }
+
+                                // log_box := Text {
+                                //     text: "";
+                                //     wrap: word-wrap;
+                                //     horizontal-alignment: left;
+                                //     vertical-alignment: top;
+
+                                //     width: parent.width;
+                                //     height: self.preferred-height;
+                                //     y: 0px;
+                                // }
+                            }
+                        }
+
+
+                    }
+                }
+            }
+        }
+    }
+
+    droneMenu := DroneMenu {
+        visible: false;
+        remove_node(input) => {
+            root.remove_node(input);
+        }
+        crash_node(input) => {
+            root.crash_node(input);
+        }
+    }
+
+    pdrMenu := PDRMenu {
+        visible: false;
+        initialValue: initial_pdr;
+        on_ok(value) => {
+            pdrMenu.currentValue = root.validate_pdr(value, pdrMenu.currentValue);
+            pdr_button.text = @tr("Change PDR - {}%", pdrMenu.currentValue);
+        }
+    }
+
+    addSenderMenu := AddSenderMenu {
+        visible: false;
+        on_ok(value) => {
+            root.validate_node_id(value);
+        }
+    }
+}

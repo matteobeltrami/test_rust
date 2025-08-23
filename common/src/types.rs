@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::{collections::HashMap, str::FromStr};
 use std::fmt::Display;
 use anyhow::anyhow;
@@ -83,6 +84,7 @@ impl TextFile {
 
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+
 pub struct MediaFile {
     pub id: Uuid,
     pub title: String,
@@ -162,6 +164,17 @@ pub enum WebRequest {
     MediaQuery { media_id: String },
 }
 
+impl WebRequest {
+    #[must_use]
+    pub fn get_file_id(&self) -> Option<String> {
+        match self {
+            Self::FileQuery { file_id} => Some(file_id.clone()),
+            Self::MediaQuery { media_id } => Some(media_id.clone()),
+            _ => None
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "response_type")]
 pub enum WebResponse {
@@ -231,12 +244,43 @@ impl Message {
     }
 }
 
+pub trait Command: Send {
+    fn as_any(&self) -> &dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
+
+}
+
+impl<T: 'static + Send> Command for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
+
+pub trait Event: Send {
+    fn as_any(&self) -> &dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
+}
+
+impl<T: 'static + Send> Event for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ChatCommand {
     GetChatsHistory,
     GetRegisteredClients,
     SendMessage(Message)
 }
+
 
 #[derive(Debug, Clone)]
 pub enum ChatEvent {
@@ -253,7 +297,7 @@ pub enum WebCommand {
     GetTextFiles,
     GetTextFile(Uuid),
     GetMediaFiles,
-    GetMediaFile(Uuid),
+    GetMediaFile { media_id: Uuid, location: NodeId },
     AddTextFile(TextFile),
     AddTextFileFromPath(String),
     AddMediaFile(MediaFile),
@@ -261,6 +305,7 @@ pub enum WebCommand {
     RemoveTextFile(Uuid),
     RemoveMediaFile(Uuid),
 }
+
 
 #[derive(Debug, Clone)]
 pub enum WebEvent {
@@ -292,6 +337,7 @@ pub enum NodeCommand {
     RemoveSender(NodeId),
     Shutdown,
 }
+
 
 impl NodeCommand {
     #[must_use]

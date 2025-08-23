@@ -1,31 +1,30 @@
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use crossbeam::channel::{Receiver, Sender};
 use wg_internal::network::NodeId;
 use wg_internal::packet::{NodeType, Packet};
 use common::{FragmentAssembler, RoutingHandler};
 use common::packet_processor::Processor;
-use common::types::{ChatCommand, ChatEvent, ChatRequest, ChatResponse, NodeCommand, ServerType};
+use common::types::{ChatCommand, ChatEvent, ChatRequest, ChatResponse, Command, Event, NodeCommand, ServerType};
 
 pub struct ChatServer {
     routing_handler: RoutingHandler,
-    controller_recv: Receiver<Box<dyn Any>>,
-    controller_send: Sender<Box<dyn Any>>,
+    controller_recv: Receiver<Box<dyn Command>>,
+    controller_send: Sender<Box<dyn Event>>,
     packet_recv: Receiver<Packet>,
-    id: NodeId,
+    _id: NodeId,
     assembler: FragmentAssembler,
     registered_clients: HashSet<NodeId>,
 }
 
 impl ChatServer {
-    pub fn new(id: NodeId, neighbors: HashMap<NodeId, Sender<Packet>>, packet_recv: Receiver<Packet>, controller_recv: Receiver<Box<dyn Any>>, controller_send: Sender<Box<dyn Any>>) -> Self {
+    pub fn new(id: NodeId, neighbors: HashMap<NodeId, Sender<Packet>>, packet_recv: Receiver<Packet>, controller_recv: Receiver<Box<dyn Command>>, controller_send: Sender<Box<dyn Event>>) -> Self {
         let router = RoutingHandler::new(id, NodeType::Server, neighbors, controller_send.clone());
         Self {
             routing_handler: router,
             controller_recv,
             controller_send,
             packet_recv,
-            id,
+            _id: id,
             assembler: FragmentAssembler::default(),
             registered_clients: HashSet::new(),
         }
@@ -36,7 +35,7 @@ impl ChatServer {
 }
 
 impl Processor for ChatServer {
-    fn controller_recv(&self) -> &Receiver<Box<dyn Any>> {
+    fn controller_recv(&self) -> &Receiver<Box<dyn Command>> {
         &self.controller_recv
     }
 
@@ -87,7 +86,8 @@ impl Processor for ChatServer {
         }
     }
 
-    fn handle_command(&mut self, cmd: Box<dyn Any>) -> bool {
+    fn handle_command(&mut self, cmd: Box<dyn Command>) -> bool {
+        let cmd = cmd.into_any();
         if let Some(cmd) = cmd.downcast_ref::<NodeCommand>() {
             match cmd {
                 NodeCommand::AddSender(node_id, sender) => self.routing_handler.add_neighbor(*node_id, sender.clone()),
@@ -112,15 +112,15 @@ impl Processor for ChatServer {
 mod communication_server_tests {
     use super::*;
     use crossbeam::channel::unbounded;
-    use common::types::{ChatRequest};
 
-    fn create_test_chat_server() -> (ChatServer, Receiver<Packet>, Sender<Box<dyn Any>>) {
+    fn create_test_chat_server() -> (ChatServer, Receiver<Packet>, Sender<Box<dyn Command>>) {
         let (controller_send, controller_recv) = unbounded();
+        let (event_send, _event_recv) = unbounded::<Box<dyn Event>>();
         let (packet_send, packet_recv) = unbounded();
         let mut neighbors = HashMap::new();
         neighbors.insert(2, packet_send);
 
-        let server = ChatServer::new(1, neighbors, packet_recv.clone(), controller_recv, controller_send.clone());
+        let server = ChatServer::new(1, neighbors, packet_recv.clone(), controller_recv, event_send);
         (server, packet_recv, controller_send)
     }
 

@@ -1,10 +1,9 @@
 use common::packet_processor::Processor;
 use common::types::{
-    ChatCommand, ChatEvent, ChatRequest, ChatResponse, Message, NodeCommand, ServerType,
+    ChatCommand, ChatEvent, ChatRequest, ChatResponse, Command, Event, Message, NodeCommand, ServerType
 };
 use common::{FragmentAssembler, RoutingHandler};
 use crossbeam_channel::{Receiver, Sender};
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use wg_internal::packet::NodeType;
 use wg_internal::{network::NodeId, packet::Packet};
@@ -12,8 +11,8 @@ use wg_internal::{network::NodeId, packet::Packet};
 pub struct ChatClient {
     id: NodeId,
     routing_handler: RoutingHandler,
-    controller_recv: Receiver<Box<dyn Any>>,
-    controller_send: Sender<Box<dyn Any>>,
+    controller_recv: Receiver<Box<dyn Command>>,
+    controller_send: Sender<Box<dyn Event>>,
     packet_recv: Receiver<Packet>,
     assembler: FragmentAssembler,
     registered_clients: HashSet<NodeId>,
@@ -27,8 +26,8 @@ impl ChatClient {
         id: NodeId,
         neighbors: HashMap<NodeId, Sender<Packet>>,
         packet_recv: Receiver<Packet>,
-        controller_recv: Receiver<Box<dyn Any>>,
-        controller_send: Sender<Box<dyn Any>>,
+        controller_recv: Receiver<Box<dyn Command>>,
+        controller_send: Sender<Box<dyn Event>>,
     ) -> Self {
         let routing_handler =
             RoutingHandler::new(id, NodeType::Client, neighbors, controller_send.clone());
@@ -65,7 +64,7 @@ impl ChatClient {
 }
 
 impl Processor for ChatClient {
-    fn controller_recv(&self) -> &Receiver<Box<dyn Any>> {
+    fn controller_recv(&self) -> &Receiver<Box<dyn Command>> {
         &self.controller_recv
     }
 
@@ -81,7 +80,8 @@ impl Processor for ChatClient {
         &mut self.routing_handler
     }
 
-    fn handle_command(&mut self, cmd: Box<dyn Any>) -> bool {
+    fn handle_command(&mut self, cmd: Box<dyn Command>) -> bool {
+        let cmd = cmd.into_any();
         if let Some(cmd) = cmd.downcast_ref::<ChatCommand>() {
             match cmd {
                 ChatCommand::GetChatsHistory => {
@@ -163,15 +163,16 @@ mod chat_client_tests {
     use common::types::{ChatResponse, ServerType, Message};
 
     fn create_test_chat_client() -> ChatClient {
-        let (controller_send, controller_recv) = unbounded();
+        let (_controller_send, controller_recv) = unbounded();
+        let (event_send, _event_recv) = unbounded();
         let (_, packet_recv) = unbounded();
         let neighbors = HashMap::new();
 
-        ChatClient::new(1, neighbors, packet_recv, controller_recv, controller_send)
+        ChatClient::new(1, neighbors, packet_recv, controller_recv, event_send)
     }
 
     #[test]
-    /// Tests ServerType response handling (chat server being added to HashSet)
+    /// Tests `ServerType` response handling (chat server being added to `HashSet`)
     fn test_server_type_response_handling() {
         let mut client = create_test_chat_client();
 
@@ -185,7 +186,7 @@ mod chat_client_tests {
     }
 
     #[test]
-    /// Tests ClientList response handling (chat client being added to HashSet)
+    /// Tests `ClientList` response handling (chat client being added to `HashSet`)
     fn test_client_list_response_handling() {
         let mut client = create_test_chat_client();
 
@@ -202,7 +203,7 @@ mod chat_client_tests {
     }
 
     #[test]
-    /// Tests MessageFrom reception and storage in chat_history
+    /// Tests `MessageFrom` reception and storage in `chat_history`
     fn test_message_reception_and_storage() {
         let mut client = create_test_chat_client();
 
@@ -222,13 +223,13 @@ mod chat_client_tests {
     }
 
     #[test]
-    /// Tests GetRegisteredClients, GetChatsHistory and SendMessage commands handling
+    /// Tests `GetRegisteredClients`, `GetChatsHistory` and `SendMessage` commands handling
     fn test_command_handling() {
         let mut client = create_test_chat_client();
 
         let cmd = ChatCommand::GetRegisteredClients;
-        let should_continue = client.handle_command(Box::new(cmd));
-        assert!(!should_continue);
+        let should_not_continue = client.handle_command(Box::new(cmd));
+        assert!(should_not_continue, "Continued after GetRegisteredClients");
 
         client.registered_clients.insert(10);
         client.registered_clients.insert(11);
@@ -236,12 +237,12 @@ mod chat_client_tests {
         client.insert_message(10, message);
 
         let cmd = ChatCommand::GetChatsHistory;
-        let should_continue = client.handle_command(Box::new(cmd));
-        assert!(!should_continue);
+        let should_not_continue = client.handle_command(Box::new(cmd));
+        assert!(should_not_continue, "Continued after GetChatsHistory");
 
         let message = Message::new(1, 10, "Outgoing message".to_string());
         let cmd = ChatCommand::SendMessage(message);
-        let should_continue = client.handle_command(Box::new(cmd));
-        assert!(!should_continue);
+        let should_not_continue = client.handle_command(Box::new(cmd));
+        assert!(should_not_continue, "Continued after SendMessage");
     }
 }

@@ -1,0 +1,28 @@
+import { Palette } from "palette.slint";
+
+export component Button {
+    in property <string> text;
+    callback clicked;
+
+    preferred-width: 100%;
+    preferred-height: 48px;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+
+        Text {
+            text: root.text;
+            font-size: 16px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
+
+        background: area.has-hover ? Palette.bg_highlight : Palette.bg_alt;
+    }
+}

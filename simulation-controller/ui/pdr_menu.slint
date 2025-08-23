@@ -1,0 +1,127 @@
+import { Palette } from "palette.slint";
+
+export global PdrHelper {
+    callback validate_pdr(input: string, current: string) -> string;
+}
+
+export component PDRMenu {
+
+    in property <string> initialValue;
+    in-out property <string> currentValue: initialValue;
+
+    callback on_ok(value: string);
+
+    width: 1280px;
+    height: 720px;
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Rectangle {
+        background: black;
+        opacity: 0.75;
+    }
+
+    Rectangle {
+
+        width: 480px;
+        height: 200px;
+
+        background: Palette.bg;
+
+        VerticalLayout {
+            padding: 16px;
+            HorizontalLayout {
+
+                Text {
+                    text: "Manage PDR";
+                    font-size: 18px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                    horizontal-stretch: 1; 
+                }
+
+                Rectangle {
+                    height: 32px;
+                    width: 32px;
+                    background: area1.has-hover ? #e05244 : Palette.red;
+
+                    area1 := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.visible = false; }
+                    }
+
+                    VerticalLayout {
+                        Image {
+                            source: @image-url("../assets/images/icons/close.png");
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: "Insert a PDR between 0 and 100.";
+                font-size: 16px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+
+            HorizontalLayout {
+
+                spacing: 16px;
+
+                Rectangle {
+                
+                    height: 48px;
+
+                    background: Palette.bg_alt;
+
+                    pdr_input := TextInput {
+
+                        text: root.currentValue;
+                        font-size: 16px;
+
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+
+                        input-type: number;
+                    }
+                }
+
+                Rectangle {
+
+                    width: 96px;
+
+                    area2 := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        clicked => {
+                            root.on_ok(pdr_input.text);
+                            root.visible = false;
+                        }
+                    }
+
+                    background: area2.has-hover ? Palette.bg_highlight : Palette.bg_alt;
+
+                    Text {
+                        text: "OK";
+                        font-size: 16px;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    callback grab_focus();
+    grab_focus => {
+        pdr_input.focus();
+        pdr_input.set-selection-offsets(pdr_input.text.character-count, pdr_input.text.character-count);
+    }
+}

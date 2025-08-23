@@ -1,0 +1,119 @@
+import { Palette } from "palette.slint";
+
+export component AddSenderMenu {
+
+    callback on_ok(value: string);
+
+    width: 1280px;
+    height: 720px;
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    Rectangle {
+        background: black;
+        opacity: 0.75;
+    }
+
+    Rectangle {
+
+        width: 480px;
+        height: 200px;
+
+        background: Palette.bg;
+
+        VerticalLayout {
+            padding: 16px;
+            HorizontalLayout {
+
+                Text {
+                    text: "Add Sender";
+                    font-size: 18px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                    horizontal-stretch: 1; 
+                }
+
+                Rectangle {
+                    height: 32px;
+                    width: 32px;
+                    background: area1.has-hover ? #e05244 : Palette.red;
+
+                    area1 := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.visible = false; }
+                    }
+
+                    VerticalLayout {
+                        Image {
+                            source: @image-url("../assets/images/icons/close.png");
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: "Enter the Node ID of the neighbor for the new sender.";
+                font-size: 16px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+
+            HorizontalLayout {
+
+                spacing: 16px;
+
+                Rectangle {
+                
+                    height: 48px;
+
+                    background: Palette.bg_alt;
+
+                    node_id := TextInput {
+
+                        font-size: 16px;
+
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+
+                        input-type: number;
+                    }
+                }
+
+                Rectangle {
+
+                    width: 96px;
+
+                    area2 := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        clicked => {
+                            root.on_ok(node_id.text);
+                            root.visible = false;
+                        }
+                    }
+
+                    background: area2.has-hover ? Palette.bg_highlight : Palette.bg_alt;
+
+                    Text {
+                        text: "OK";
+                        font-size: 16px;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    callback grab_focus();
+    grab_focus => {
+        node_id.focus();
+        node_id.set-selection-offsets(node_id.text.character-count, node_id.text.character-count);
+    }
+}

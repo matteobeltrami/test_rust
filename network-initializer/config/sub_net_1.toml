@@ -1,0 +1,62 @@
+# Subnet with 2 five-pointed stars
+# 2 nodes for each subnet connect the two nets
+
+# Left star
+[[drone]]
+id = 1
+connected_node_ids = [3, 4, 11]
+pdr = 0
+
+[[drone]]
+id = 2
+connected_node_ids = [4, 5, 9, 10]
+pdr = 0
+
+[[drone]]
+id = 3
+connected_node_ids = [1, 5, 9, 10]
+pdr = 0
+
+[[drone]]
+id = 4
+connected_node_ids = [1, 2]
+pdr = 0
+
+[[drone]]
+id = 5
+connected_node_ids = [2, 3]
+pdr = 0
+
+# Right star
+[[drone]]
+id = 6
+connected_node_ids = [8, 9]
+pdr = 0
+
+[[drone]]
+id = 7
+connected_node_ids = [9, 10]
+pdr = 0
+
+[[drone]]
+id = 8
+connected_node_ids = [6, 10]
+pdr = 0
+
+[[drone]]
+id = 9
+connected_node_ids = [2, 3, 6, 7, 12]
+pdr = 0
+
+[[drone]]
+id = 10
+connected_node_ids = [2, 3, 7, 8, 12]
+pdr = 0
+
+[[client]]
+id = 11
+connected_drone_ids = [1]
+
+[[server]]
+id = 12
+connected_drone_ids = [9, 10]

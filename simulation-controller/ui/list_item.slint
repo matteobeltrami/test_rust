@@ -1,0 +1,53 @@
+import { Palette } from "palette.slint";
+
+export component ListItem inherits Rectangle {
+    in property <color> stripe_color;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> id;
+    in property <length> row_height;
+
+    callback mouse_click();
+
+    height: row_height;
+    clip: true;
+
+    HorizontalLayout {
+        Rectangle {
+            horizontal-stretch: 0.05;
+            vertical-stretch: 1;
+            background: stripe_color;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+
+            area := TouchArea {
+                width: parent.width;
+                height: parent.height;
+
+                clicked => {
+                    mouse_click();
+                }
+            }
+
+            background: area.has-hover ? Palette.bg_highlight : Palette.bg_alt;
+
+            VerticalLayout {
+                width: parent.width;
+                height: parent.height;
+                padding: 12px;
+                alignment: subtitle == "" ? start : center;
+
+                Text { text: title; color: white; font-size: 16px; }
+                if subtitle != "" : Text { 
+                    text: subtitle; 
+                    color: Palette.grey; 
+                    font-weight: 600;
+                    font-size: 12px; 
+                }
+            }
+        }
+    }
+}

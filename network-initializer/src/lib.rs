@@ -7,7 +7,6 @@ mod utils;
 #[cfg(test)]
 mod tests {
 
-    // TODO: "Implement more test for parse and validation logic"
 
     use super::*;
     use crate::errors::ConfigError;

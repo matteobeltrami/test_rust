@@ -1,18 +1,17 @@
-use std::any::Any;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use crossbeam::channel::{Receiver, Sender};
-use uuid::{Uuid};
+use uuid::Uuid;
 use wg_internal::network::NodeId;
 use wg_internal::packet::{NodeType, Packet};
 use common::{FragmentAssembler, RoutingHandler};
 use common::packet_processor::Processor;
-use common::types::{File, NodeCommand, ServerType, TextFile, WebCommand, WebEvent, WebRequest, WebResponse};
+use common::types::{Command, Event, File, NodeCommand, ServerType, TextFile, WebCommand, WebEvent, WebRequest, WebResponse};
 use common::file_conversion;
 
 pub struct TextServer {
     routing_handler: RoutingHandler,
-    controller_recv: Receiver<Box<dyn Any>>,
-    controller_send: Sender<Box<dyn Any>>,
+    controller_recv: Receiver<Box<dyn Command>>,
+    controller_send: Sender<Box<dyn Event>>,
     packet_recv: Receiver<Packet>,
     id: NodeId,
     assembler: FragmentAssembler,
@@ -24,8 +23,8 @@ impl TextServer {
         id: NodeId,
         neighbors: HashMap<NodeId, Sender<Packet>>,
         packet_recv: Receiver<Packet>,
-        controller_recv: Receiver<Box<dyn Any>>,
-        controller_send: Sender<Box<dyn Any>>
+        controller_recv: Receiver<Box<dyn Command>>,
+        controller_send: Sender<Box<dyn Event>>
     ) -> Self {
         let router = RoutingHandler::new(id, NodeType::Server, neighbors, controller_send.clone());
         Self {
@@ -64,7 +63,7 @@ impl TextServer {
 }
 
 impl Processor for TextServer {
-    fn controller_recv(&self) -> &Receiver<Box<dyn Any>> {
+    fn controller_recv(&self) -> &Receiver<Box<dyn Command>> {
         &self.controller_recv
     }
 
@@ -123,7 +122,8 @@ impl Processor for TextServer {
         }
     }
 
-    fn handle_command(&mut self, cmd: Box<dyn Any>) -> bool {
+    fn handle_command(&mut self, cmd: Box<dyn Command>) -> bool {
+        let cmd = cmd.into_any();
         if let Some(cmd) = cmd.downcast_ref::<NodeCommand>() {
             match cmd {
                 NodeCommand::AddSender(node_id, sender) => self.routing_handler.add_neighbor(*node_id, sender.clone()),
@@ -183,9 +183,9 @@ impl Processor for TextServer {
                         return true;
                     }
                 }
-                WebCommand::GetMediaFile(uuid) => {
+                WebCommand::GetMediaFile{media_id,location: _location} => {
                     if self.controller_send
-                        .send(Box::new(WebEvent::FileNotFound(*uuid)))
+                        .send(Box::new(WebEvent::FileNotFound(*media_id)))
                         .is_err()
                     {
                         return true;
@@ -204,7 +204,7 @@ impl Processor for TextServer {
                     }
                 }
                 WebCommand::AddTextFileFromPath(file_path) => {
-                    match file_conversion::file_to_text_file(file_path) {
+                    match file_conversion::file_to_text_file(&file_path) {
                         Ok(text_file) => {
                             let file_id = text_file.id;
                             self.add_text_file(text_file);
@@ -271,8 +271,9 @@ mod text_server_tests {
 
     fn create_test_text_server() -> TextServer {
         let (controller_send, controller_recv) = unbounded();
+        let (event_send, _event_recv) = unbounded::<Box<dyn Event>>();
         let (_, packet_recv) = unbounded();
-        TextServer::new(1, HashMap::new(), packet_recv, controller_recv, controller_send)
+        TextServer::new(1, HashMap::new(), packet_recv, controller_recv, event_send)
     }
 
     #[test]
@@ -415,13 +416,13 @@ mod text_server_tests {
         let file_id = test_file.id;
 
         let add_command = WebCommand::AddTextFile(test_file);
-        let should_continue = server.handle_command(Box::new(add_command));
-        assert!(!should_continue);
+        let should_not_continue = server.handle_command(Box::new(add_command));
+        assert!(should_not_continue);
         assert!(server.get_file_by_id(file_id).is_some());
 
         let remove_command = WebCommand::RemoveTextFile(file_id);
-        let should_continue = server.handle_command(Box::new(remove_command));
-        assert!(!should_continue);
+        let should_not_continue = server.handle_command(Box::new(remove_command));
+        assert!(should_not_continue);
         assert!(server.get_file_by_id(file_id).is_none());
     }
 }

@@ -84,7 +84,7 @@ impl std::fmt::Debug for Node{
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Network {
     pub(crate) nodes: Vec<Node>
 }
@@ -96,6 +96,11 @@ impl Network {
         Self { nodes }
     }
 
+
+    pub fn add_node_controller_view(&mut self, node_id: NodeId, node_type: NodeType, adjacents: &[NodeId]) {
+        let node = Node::new(node_id, node_type, adjacents.to_vec());
+        self.nodes.push(node);
+    }
 
     pub(crate) fn add_node(&mut self, new_node: Node) {
         for adj in new_node.get_adjacents() {

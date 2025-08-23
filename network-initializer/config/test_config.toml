@@ -1,0 +1,26 @@
+[[drone]]
+id = 9
+connected_node_ids = [2, 3]
+pdr = 0
+
+[[drone]]
+id = 1
+connected_node_ids = [3, 4]
+pdr = 0
+
+[[drone]]
+id = 5
+connected_node_ids = [3, 4]
+pdr = 0
+
+[[client]]
+id = 2
+connected_drone_ids = [9]
+
+[[server]]
+id = 3
+connected_drone_ids = [9, 1]
+
+[[server]]
+id = 4
+connected_drone_ids = [1]

@@ -1,17 +1,17 @@
-use std::any::Any;
-use std::{collections::HashMap, str::FromStr};
-use std::fmt::Display;
 use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
-use wg_internal::{network::NodeId, packet::Packet};
 use crossbeam_channel::Sender;
+use serde::{Deserialize, Serialize};
+use std::any::Any;
+use std::fmt::Display;
+use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
+use wg_internal::{network::NodeId, packet::Packet};
 pub type Bytes = Vec<u8>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct MediaReference {
     location: NodeId,
-    pub id: Uuid
+    pub id: Uuid,
 }
 
 impl MediaReference {
@@ -19,7 +19,7 @@ impl MediaReference {
     pub fn new(location: NodeId) -> Self {
         Self {
             location,
-            id: Uuid::new_v4()
+            id: Uuid::new_v4(),
         }
     }
 
@@ -43,21 +43,23 @@ impl FromStr for MediaReference {
             if let Some(c) = value.chars().position(|c| c == '/') {
                 c
             } else {
-                return Err(anyhow!("Cannot parse media reference"))
+                return Err(anyhow!("Cannot parse media reference"));
             }
         });
-        Ok(Self { location: u8::from_str(location)?, id: Uuid::from_str(id)? })
+        Ok(Self {
+            location: u8::from_str(location)?,
+            id: Uuid::from_str(id)?,
+        })
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct TextFile{
+pub struct TextFile {
     pub id: Uuid,
     pub title: String,
     pub content: String,
-    pub media_refs: Vec<MediaReference>
+    pub media_refs: Vec<MediaReference>,
 }
-
 
 impl TextFile {
     #[must_use]
@@ -66,7 +68,7 @@ impl TextFile {
             title,
             id: Uuid::new_v4(),
             content,
-            media_refs
+            media_refs,
         }
     }
 
@@ -75,13 +77,11 @@ impl TextFile {
         self.media_refs.clone()
     }
 
-
     #[must_use]
     pub fn get_media_ids(&self) -> Vec<Uuid> {
         self.media_refs.iter().map(|m| m.id).collect()
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 
@@ -104,10 +104,7 @@ impl MediaFile {
     #[must_use]
     pub fn from_u8(filename: String, data: &[u8]) -> Self {
         let chunk_size = 1024;
-        let content: Vec<Bytes> = data
-            .chunks(chunk_size)
-            .map(<[u8]>::to_vec)
-            .collect();
+        let content: Vec<Bytes> = data.chunks(chunk_size).map(<[u8]>::to_vec).collect();
 
         Self::new(filename, content)
     }
@@ -132,9 +129,8 @@ impl MediaFile {
 pub struct File {
     pub id: Uuid,
     pub text_file: TextFile,
-    media_files: Vec<MediaFile>
+    media_files: Vec<MediaFile>,
 }
-
 
 impl File {
     #[must_use]
@@ -142,11 +138,10 @@ impl File {
         Self {
             id: text_file.id,
             text_file,
-            media_files
+            media_files,
         }
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "request_type")]
@@ -168,9 +163,9 @@ impl WebRequest {
     #[must_use]
     pub fn get_file_id(&self) -> Option<String> {
         match self {
-            Self::FileQuery { file_id} => Some(file_id.clone()),
+            Self::FileQuery { file_id } => Some(file_id.clone()),
             Self::MediaQuery { media_id } => Some(media_id.clone()),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -192,9 +187,12 @@ pub enum WebResponse {
 
     #[serde(rename = "error_requested_not_found!")]
     ErrorFileNotFound(Uuid),
+
+    #[serde(rename = "error_uuid_parsing!")]
+    BadUuid(String),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "request_type")]
 pub enum ChatRequest {
     #[serde(rename = "server_type?")]
@@ -223,7 +221,7 @@ pub enum ChatResponse {
     MessageFrom { client_id: NodeId, message: String },
 
     #[serde(rename = "error_wrong_client_id!")]
-    ErrorWrongClientId,
+    ErrorWrongClientId { wrong_id: NodeId },
 
     // Custom response for successful registration
     #[serde(rename = "registration_success")]
@@ -247,7 +245,6 @@ impl Message {
 pub trait Command: Send {
     fn as_any(&self) -> &dyn Any;
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
-
 }
 
 impl<T: 'static + Send> Command for T {
@@ -258,7 +255,6 @@ impl<T: 'static + Send> Command for T {
         self
     }
 }
-
 
 pub trait Event: Send {
     fn as_any(&self) -> &dyn Any;
@@ -278,16 +274,49 @@ impl<T: 'static + Send> Event for T {
 pub enum ChatCommand {
     GetChatsHistory,
     GetRegisteredClients,
-    SendMessage(Message)
+    SendMessage(Message),
 }
-
 
 #[derive(Debug, Clone)]
 pub enum ChatEvent {
-    ChatHistory(HashMap<NodeId, Vec<Message>>),
-    RegisteredClients(Vec<NodeId>),
-    MessageSent,
-    MessageReceived(Message)
+    ChatHistory {
+        notification_from: NodeId,
+        history: HashMap<NodeId, Vec<Message>>,
+    },
+    RegisteredClients {
+        notification_from: NodeId,
+        list: Vec<NodeId>,
+    },
+    MessageSent {
+        notification_from: NodeId,
+        to: NodeId,
+    },
+    MessageReceived {
+        notification_from: NodeId,
+        msg: Message,
+    },
+    ClientRegistered {
+        client: NodeId,
+        server: NodeId,
+    }, // client_id, server_id
+    ClientListQueried {
+        notification_from: NodeId,
+        from: NodeId,
+    }, // requester_id, server_id
+    ClientNotInList {
+        notification_from: NodeId,
+        id: NodeId,
+    },
+    ErrorClientNotFound {
+        notification_from: NodeId,
+        location: NodeId,
+        not_found: NodeId,
+    },
+
+    RegistrationSucceeded {
+        notification_from: NodeId,
+        to: NodeId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -306,29 +335,93 @@ pub enum WebCommand {
     RemoveMediaFile(Uuid),
 }
 
-
 #[derive(Debug, Clone)]
 pub enum WebEvent {
-    CachedFiles(Vec<File>),
-    File(File),
-    TextFiles(Vec<TextFile>),
-    TextFile(TextFile),
-    MediaFiles(Vec<MediaFile>),
-    MediaFile(MediaFile),
-    FileNotFound(Uuid),
-    TextFileAdded(Uuid),
-    MediaFileAdded(Uuid),
-    TextFileRemoved(Uuid),
-    MediaFileRemoved(Uuid),
-    FileOperationError(String),
+    CachedFiles {
+        notification_from: NodeId,
+        files: Vec<File>,
+    },
+    File {
+        notification_from: NodeId,
+        file: File,
+    },
+    TextFiles {
+        notification_from: NodeId,
+        files: Vec<TextFile>,
+    },
+    TextFile {
+        notification_from: NodeId,
+        file: TextFile,
+    },
+    MediaFiles {
+        notification_from: NodeId,
+        files: Vec<MediaFile>,
+    },
+    MediaFile {
+        notification_from: NodeId,
+        file: MediaFile,
+    },
+    FileNotFound {
+        notification_from: NodeId,
+        uuid: Uuid,
+    },
+    TextFileAdded {
+        notification_from: NodeId,
+        uuid: Uuid,
+    },
+    MediaFileAdded {
+        notification_from: NodeId,
+        uuid: Uuid,
+    },
+    TextFileRemoved {
+        notification_from: NodeId,
+        uuid: Uuid,
+    },
+    MediaFileRemoved {
+        notification_from: NodeId,
+        uuid: Uuid,
+    },
+    FileOperationError {
+        notification_from: NodeId,
+        msg: String,
+    },
+    FileRequested {
+        notification_from: NodeId,
+        from: NodeId,
+        uuid: String,
+    }, // server_id, requester_id, file_id
+    FileServed {
+        notification_from: NodeId,
+        file: String,
+    }, // server_id, file_id
+    FilesListQueried {
+        notification_from: NodeId,
+        from: NodeId,
+    }, // requester_id, server_id
+    BadUuid {
+        notification_from: NodeId,
+        from: NodeId,
+        uuid: String,
+    }, // requester_id, server_id, uuid
 }
-
 
 #[derive(Debug, Clone)]
 pub enum NodeEvent {
     PacketSent(Packet),
     FloodStarted(u64, NodeId),
-    NodeRemoved(NodeId)
+    NodeRemoved(NodeId),
+    MessageReceived {
+        notification_from: NodeId,
+        from: NodeId,
+    }, // from, to
+    MessageSent {
+        notification_from: NodeId,
+        to: NodeId,
+    }, // from, to
+    ServerTypeQueried {
+        notification_from: NodeId,
+        from: NodeId,
+    }, // server_id, requester_id
 }
 
 #[derive(Debug, Clone)]
@@ -337,7 +430,6 @@ pub enum NodeCommand {
     RemoveSender(NodeId),
     Shutdown,
 }
-
 
 impl NodeCommand {
     #[must_use]
@@ -365,4 +457,25 @@ pub enum ServerType {
     ChatServer,
     TextServer,
     MediaServer,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum NodeType {
+    ChatServer,
+    ChatClient,
+    TextServer,
+    MediaServer,
+    WebBrowser,
+}
+
+impl Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::ChatClient => write!(f, "Chat-Client"),
+            Self::WebBrowser => write!(f, "Web-Browser"),
+            Self::ChatServer => write!(f, "Chat-Server"),
+            Self::MediaServer => write!(f, "Media-Server"),
+            Self::TextServer => write!(f, "Text-Server")
+        }
+    }
 }

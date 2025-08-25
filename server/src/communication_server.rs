@@ -1,22 +1,24 @@
+
 use std::collections::{HashMap, HashSet};
 use crossbeam::channel::{Receiver, Sender};
 use wg_internal::network::NodeId;
 use wg_internal::packet::{NodeType, Packet};
 use common::{FragmentAssembler, RoutingHandler};
 use common::packet_processor::Processor;
-use common::types::{ChatCommand, ChatEvent, ChatRequest, ChatResponse, Command, Event, NodeCommand, ServerType};
+use common::types::{ChatCommand, ChatEvent, ChatRequest, ChatResponse, Command, Event, NodeCommand, NodeEvent, ServerType};
 
 pub struct ChatServer {
     routing_handler: RoutingHandler,
     controller_recv: Receiver<Box<dyn Command>>,
     controller_send: Sender<Box<dyn Event>>,
     packet_recv: Receiver<Packet>,
-    _id: NodeId,
+    id: NodeId,
     assembler: FragmentAssembler,
     registered_clients: HashSet<NodeId>,
 }
 
 impl ChatServer {
+    #[must_use]
     pub fn new(id: NodeId, neighbors: HashMap<NodeId, Sender<Packet>>, packet_recv: Receiver<Packet>, controller_recv: Receiver<Box<dyn Command>>, controller_send: Sender<Box<dyn Event>>) -> Self {
         let router = RoutingHandler::new(id, NodeType::Server, neighbors, controller_send.clone());
         Self {
@@ -24,13 +26,14 @@ impl ChatServer {
             controller_recv,
             controller_send,
             packet_recv,
-            _id: id,
+            id,
             assembler: FragmentAssembler::default(),
             registered_clients: HashSet::new(),
         }
     }
+    #[must_use]
     pub fn get_registered_clients(&self) -> Vec<NodeId> {
-        self.registered_clients.iter().cloned().collect()
+        self.registered_clients.iter().copied().collect()
     }
 }
 
@@ -52,34 +55,72 @@ impl Processor for ChatServer {
     }
 
     fn handle_msg(&mut self, msg: Vec<u8>, from: NodeId, session_id: u64) {
+        let _ = self.controller_send.send(Box::new(NodeEvent::MessageReceived {
+            notification_from: self.id,
+            from
+        }));
         if let Ok(msg) = serde_json::from_slice::<ChatRequest>(&msg) {
             match msg {
                 ChatRequest::ServerTypeQuery => {
+                    let _ = self.controller_send.send(Box::new(NodeEvent::ServerTypeQueried {
+                        notification_from: self.id,
+                        from
+                    }));
                     if let Ok(res) = serde_json::to_vec(&ChatResponse::ServerType { server_type: ServerType::ChatServer }) {
                         let _ = self.routing_handler.send_message(&res, from, Some(session_id));
+                        let _ = self.controller_send.send(Box::new(NodeEvent::MessageSent {
+                            notification_from: self.id,
+                            to: from
+                        }));
                     }
                 }
                 ChatRequest::RegistrationToChat { client_id } => {
                     self.registered_clients.insert(client_id);
                     if let Ok(res) = serde_json::to_vec(&ChatResponse::RegistrationSuccess) {
                         let _ = self.routing_handler.send_message(&res, from, Some(session_id));
+                        let _ = self.controller_send.send(Box::new(NodeEvent::MessageSent {
+                            notification_from: self.id,
+                            to: from
+                        }));
+                        let _ = self.controller_send.send(Box::new(ChatEvent::ClientRegistered {
+                            client: client_id,
+                            server: self.id
+                        }));
                     }
                 }
                 ChatRequest::ClientListQuery => {
-                    let client_list = self.registered_clients.iter().cloned().collect::<Vec<_>>();
+                    let _ = self.controller_send.send(Box::new(ChatEvent::ClientListQueried {
+                        notification_from: self.id,
+                        from
+                    }));
+                    let client_list = self.registered_clients.iter().copied().collect::<Vec<_>>();
                     if let Ok(res) = serde_json::to_vec(&ChatResponse::ClientList {list_of_client_ids: client_list}) {
                         let _ = self.routing_handler.send_message(&res, from, Some(session_id));
+                        let _ = self.controller_send.send(Box::new(NodeEvent::MessageSent {
+                            notification_from: self.id,
+                            to: from
+                        }));
                     }
                 }
                 ChatRequest::MessageFor { client_id, message } => {
                     if !self.registered_clients.contains(&client_id) {
-                        if let Ok(res) = serde_json::to_vec(&ChatResponse::ErrorWrongClientId) {
+                        if let Ok(res) = serde_json::to_vec(&ChatResponse::ErrorWrongClientId {
+                            wrong_id: client_id
+                        }) {
                             let _ = self.routing_handler.send_message(&res, from, Some(session_id));
+                            let _ = self.controller_send.send(Box::new(NodeEvent::MessageSent {
+                                notification_from: self.id,
+                                to: from
+                            }));
                         }
                         return
                     }
                     if let Ok(res) = serde_json::to_vec(&ChatResponse::MessageFrom { client_id: from, message }) {
                         let _ = self.routing_handler.send_message(&res, client_id, Some(session_id));
+                        let _ = self.controller_send.send(Box::new(NodeEvent::MessageSent {
+                            notification_from: self.id,
+                            to: client_id
+                        }));
                     }
                 }
             }
@@ -94,22 +135,22 @@ impl Processor for ChatServer {
                 NodeCommand::RemoveSender(node_id) => self.routing_handler.remove_neighbor(*node_id),
                 NodeCommand::Shutdown => return true
             }
-        } else if let Some(cmd) = cmd.downcast_ref::<ChatCommand>() {
-            match cmd {
-                ChatCommand::GetRegisteredClients => {
-                    let registered_clients = self.get_registered_clients();
-                    if self.controller_send.send(Box::new(ChatEvent::RegisteredClients(registered_clients))).is_err() {
-                        return true;
-                    }
-                }
-                _ => {}
+        } else if let Some(ChatCommand::GetRegisteredClients) = cmd.downcast_ref::<ChatCommand>() {
+            let registered_clients = self.get_registered_clients();
+            if self.controller_send.send(Box::new(ChatEvent::RegisteredClients {
+                notification_from: self.id,
+                list: registered_clients
+            })).is_err() {
+                return true;
             }
+        
         }
         false
     }
 }
 
 mod communication_server_tests {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
     use crossbeam::channel::unbounded;
 

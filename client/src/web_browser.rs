@@ -1,17 +1,18 @@
-use std::collections::{hash_map::Entry::Vacant, HashMap, HashSet};
+use crate::errors::ClientError;
 use common::{
-    types::{
-        Command, Event, File, MediaFile, NodeCommand, ServerType, TextFile, WebCommand, WebEvent, WebRequest, WebResponse
-    },
     FragmentAssembler, Processor, RoutingHandler,
+    types::{
+        Command, Event, File, MediaFile, NodeCommand, NodeEvent, ServerType, TextFile, WebCommand,
+        WebEvent, WebRequest, WebResponse,
+    },
 };
 use crossbeam_channel::{Receiver, Sender};
+use std::collections::{HashMap, HashSet, hash_map::Entry::Vacant};
 use uuid::Uuid;
 use wg_internal::{
     network::NodeId,
     packet::{NodeType, Packet},
 };
-use crate::errors::ClientError;
 
 type Cache = HashMap<TextFile, Vec<MediaFile>>;
 
@@ -88,15 +89,17 @@ impl WebBrowser {
             if let Some(vec) = self.cached_files.get_mut(&file) {
                 vec.push(media);
                 if file.get_media_ids().len() == vec.len() {
-                    let _ = self
-                        .controller_send
-                        .send(Box::new(WebEvent::File(File::new(file, vec.clone()))));
+                    let _ = self.controller_send.send(Box::new(WebEvent::File {
+                        notification_from: self.id,
+                        file: File::new(file, vec.clone()),
+                    }));
                 }
             }
         } else {
-            let _ = self
-                .controller_send
-                .send(Box::new(WebEvent::MediaFile(media)));
+            let _ = self.controller_send.send(Box::new(WebEvent::MediaFile {
+                notification_from: self.id,
+                file: media,
+            }));
         }
     }
 
@@ -135,9 +138,10 @@ impl WebBrowser {
             }
         }
         if file.get_refs().is_empty() {
-            let _ = self
-                .controller_send
-                .send(Box::new(WebEvent::File(File::new(file.clone(), vec![]))));
+            let _ = self.controller_send.send(Box::new(WebEvent::File {
+                notification_from: self.id,
+                file: File::new(file.clone(), vec![]),
+            }));
         }
         let _ = self.cached_files.insert(file, vec![]);
     }
@@ -171,7 +175,10 @@ impl WebBrowser {
 
     fn handle_get_cached_files(&self) -> bool {
         let files = self.get_files();
-        self.try_send(WebEvent::CachedFiles(files))
+        self.try_send(WebEvent::CachedFiles {
+            notification_from: self.id,
+            files,
+        })
     }
 
     fn broadcast(&mut self) {
@@ -186,7 +193,10 @@ impl WebBrowser {
 
     fn handle_get_file(&mut self, uuid: Uuid) -> bool {
         if let Some(file) = self.get_file(uuid) {
-            return self.try_send(WebEvent::File(file));
+            return self.try_send(WebEvent::File {
+                notification_from: self.id,
+                file,
+            });
         }
         match self.forward_request(&WebRequest::FileQuery {
             file_id: uuid.to_string(),
@@ -209,12 +219,18 @@ impl WebBrowser {
 
     fn handle_get_text_files(&self) -> bool {
         let files = self.cached_files.keys().cloned().collect::<Vec<_>>();
-        self.try_send(WebEvent::TextFiles(files))
+        self.try_send(WebEvent::TextFiles {
+            notification_from: self.id,
+            files,
+        })
     }
 
     fn handle_get_text_file(&mut self, uuid: Uuid) -> bool {
         if let Some(file) = self.cached_files.keys().find(|f| f.id == uuid) {
-            return self.try_send(WebEvent::TextFile(file.clone()));
+            return self.try_send(WebEvent::TextFile {
+                notification_from: self.id,
+                file: file.clone(),
+            });
         }
         match self.forward_request(&WebRequest::FileQuery {
             file_id: uuid.to_string(),
@@ -236,13 +252,19 @@ impl WebBrowser {
 
     fn handle_get_media_files(&self) -> bool {
         let media: HashSet<_> = self.cached_files.values().flatten().cloned().collect();
-        self.try_send(WebEvent::MediaFiles(media.into_iter().collect()))
+        self.try_send(WebEvent::MediaFiles {
+            notification_from: self.id,
+            files: media.into_iter().collect(),
+        })
     }
 
     fn handle_get_media_file(&mut self, media_id: Uuid, location: NodeId) -> bool {
         for v in self.cached_files.values() {
             if let Some(media) = v.iter().find(|m| m.id == media_id) {
-                return self.try_send(WebEvent::MediaFile(media.clone()));
+                return self.try_send(WebEvent::MediaFile {
+                    notification_from: self.id,
+                    file: media.clone(),
+                });
             }
         }
         if let Ok(req) = serde_json::to_vec(&WebRequest::MediaQuery {
@@ -272,7 +294,6 @@ impl Processor for WebBrowser {
     }
 
     fn handle_command(&mut self, cmd: Box<dyn Command>) -> bool {
-
         let cmd = cmd.into_any();
         if let Some(cmd) = cmd.downcast_ref::<WebCommand>() {
             match cmd {
@@ -286,7 +307,7 @@ impl Processor for WebBrowser {
                 }
                 _ => {
                     eprintln!("Unsupported command: {cmd:?}");
-                    todo!()
+                    false
                 }
             }
         } else if let Some(cmd) = cmd.downcast_ref::<NodeCommand>() {
@@ -307,6 +328,12 @@ impl Processor for WebBrowser {
     }
 
     fn handle_msg(&mut self, msg: Vec<u8>, from: NodeId, session_id: u64) {
+        let _ = self
+            .controller_send
+            .send(Box::new(NodeEvent::MessageReceived {
+                notification_from: self.id,
+                from,
+            }));
         if let Ok(msg) = serde_json::from_slice::<WebResponse>(&msg) {
             match msg {
                 WebResponse::ServerType { server_type } => {
@@ -338,18 +365,23 @@ impl Processor for WebBrowser {
                         self.manage_media_file(mediafile);
                     }
                 }
-
                 WebResponse::ErrorFileNotFound(uuid) => {
-                    let _ = self
-                        .controller_send
-                        .send(Box::new(WebEvent::FileNotFound(uuid)));
+                    let _ = self.controller_send.send(Box::new(WebEvent::FileNotFound {
+                        notification_from: self.id,
+                        uuid,
+                    }));
+                }
+                WebResponse::BadUuid(uuid) => {
+                    let _ = self.controller_send.send(Box::new(WebEvent::BadUuid {
+                        notification_from: self.id,
+                        from,
+                        uuid,
+                    }));
                 }
             }
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod web_browser_tests {

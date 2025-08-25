@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::utils::NodeType;
-use toml;
 use wg_internal::config::Config;
 use wg_internal::network::NodeId;
 
@@ -12,17 +11,17 @@ pub trait Parse {
 }
 
 impl Parse for Config {
-    fn parse_config(path: &str) -> Result<Config, ConfigError> {
-        if path.is_empty() {
+    fn parse_config(path_str: &str) -> Result<Config, ConfigError> {
+        if path_str.is_empty() {
             return Err(ConfigError::EmptyPath);
         }
-        let _path = std::path::Path::new(path);
-        if !_path.exists() {
-            return Err(ConfigError::ConfigNotFound(path.to_string()));
+        let path = std::path::Path::new(path_str);
+        if !path.exists() {
+            return Err(ConfigError::ConfigNotFound(path_str.to_string()));
         }
 
-        let content =
-            std::fs::read_to_string(path).map_err(|e| ConfigError::ParseError(e.to_string()))?;
+        let content = std::fs::read_to_string(path_str)
+            .map_err(|e| ConfigError::ParseError(e.to_string()))?;
 
         let config: Config =
             toml::from_str(&content).map_err(|e| ConfigError::ParseError(e.to_string()))?;
@@ -33,20 +32,36 @@ impl Parse for Config {
 
 pub trait Validate {
     fn validate_config(&self) -> Result<(), ConfigError>;
+    fn validate_unique_ids(&self) -> Result<(), ConfigError>;
+    fn validate_pdr_values(&self) -> Result<(), ConfigError>;
+    fn validate_self_connections(&self) -> Result<(), ConfigError>;
+    fn validate_client_connections(&self) -> Result<(), ConfigError>;
+    fn validate_server_connections(&self) -> Result<(), ConfigError>;
+    fn validate_bidirectional_connections(&self) -> Result<(), ConfigError>;
 }
 
 impl Validate for Config {
     fn validate_config(&self) -> Result<(), ConfigError> {
+        self.validate_unique_ids()?;
+        self.validate_pdr_values()?;
+        self.validate_self_connections()?;
+        self.validate_client_connections()?;
+        self.validate_server_connections()?;
+        self.validate_bidirectional_connections()?;
+        Ok(())
+    }
+
+    fn validate_unique_ids(&self) -> Result<(), ConfigError> {
         let drone_ids: HashSet<NodeId> = self.drone.iter().map(|d| d.id).collect();
         let client_ids: HashSet<NodeId> = self.client.iter().map(|c| c.id).collect();
         let server_ids: HashSet<NodeId> = self.server.iter().map(|s| s.id).collect();
 
         let all_ids: HashSet<NodeId> = drone_ids
             .union(&client_ids)
-            .cloned()
+            .copied()
             .collect::<HashSet<_>>()
             .union(&server_ids)
-            .cloned()
+            .copied()
             .collect();
 
         if all_ids.len() != (drone_ids.len() + client_ids.len() + server_ids.len()) {
@@ -56,7 +71,7 @@ impl Validate for Config {
         }
 
         if drone_ids.len() != self.drone.len() {
-            return Err(ConfigError::InvalidConfig(
+            return Err(ConfigError::DuplicateNodeId(
                 "Duplicate drone IDs found in configuration".to_string(),
             ));
         }
@@ -73,10 +88,17 @@ impl Validate for Config {
             ));
         }
 
-        if let Some(_drone) = self.drone.iter().find(|d| d.pdr < 0.0 || d.pdr > 1.0) {
+        Ok(())
+    }
+
+    fn validate_pdr_values(&self) -> Result<(), ConfigError> {
+        if self.drone.iter().any(|d| d.pdr < 0.0 || d.pdr > 1.0) {
             return Err(ConfigError::InvalidPdrValue);
         }
+        Ok(())
+    }
 
+    fn validate_self_connections(&self) -> Result<(), ConfigError> {
         if let Some(drone) = self
             .drone
             .iter()
@@ -110,6 +132,13 @@ impl Validate for Config {
             )));
         }
 
+        Ok(())
+    }
+
+    fn validate_client_connections(&self) -> Result<(), ConfigError> {
+        let client_ids: HashSet<NodeId> = self.client.iter().map(|c| c.id).collect();
+        let server_ids: HashSet<NodeId> = self.server.iter().map(|s| s.id).collect();
+
         if let Some(client) = self.client.iter().find(|c| {
             c.connected_drone_ids
                 .iter()
@@ -119,7 +148,7 @@ impl Validate for Config {
                     .any(|id| server_ids.contains(id))
         }) {
             return Err(ConfigError::InvalidNodeConnection(format!(
-                "Client {} cannot have other clients  or servers in its connected_drone_ids",
+                "Client {} cannot have other clients or servers in its connected_drone_ids",
                 client.id
             )));
         }
@@ -127,13 +156,20 @@ impl Validate for Config {
         if let Some(client) = self
             .client
             .iter()
-            .find(|c| c.connected_drone_ids.len() < 1 || c.connected_drone_ids.len() > 2)
+            .find(|c| c.connected_drone_ids.is_empty() || c.connected_drone_ids.len() > 2)
         {
             return Err(ConfigError::InvalidConfig(format!(
                 "Client {} must have exactly one or two connected drones",
                 client.id
             )));
         }
+
+        Ok(())
+    }
+
+    fn validate_server_connections(&self) -> Result<(), ConfigError> {
+        let client_ids: HashSet<NodeId> = self.client.iter().map(|c| c.id).collect();
+        let server_ids: HashSet<NodeId> = self.server.iter().map(|s| s.id).collect();
 
         if let Some(server) = self.server.iter().find(|s| {
             s.connected_drone_ids
@@ -156,6 +192,10 @@ impl Validate for Config {
             )));
         }
 
+        Ok(())
+    }
+
+    fn validate_bidirectional_connections(&self) -> Result<(), ConfigError> {
         let node_map: HashMap<NodeId, NodeType> = self
             .drone
             .iter()

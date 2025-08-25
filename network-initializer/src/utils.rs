@@ -4,7 +4,7 @@
 
 use ap2024_unitn_cppenjoyers_drone::CppEnjoyersDrone;
 use common::types::NodeCommand;
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender, unbounded};
 use d_r_o_n_e_drone::MyDrone as DroneDrone;
 use dr_ones::Drone as DrOnesDrone;
 use lockheedrustin_drone::LockheedRustin;
@@ -65,7 +65,6 @@ macro_rules! drone_factories {
                     packet_send: HashMap<NodeId, Sender<Packet>>,
                     pdr: f32,
                 ) -> Box<dyn DroneTrait> {
-                    dbg!("Created drone type: {}", std::any::type_name::<$variant>());
                     Box::new($variant::new(id, controller_send, controller_recv, packet_recv, packet_send, pdr))
                 }
             )*
@@ -101,7 +100,7 @@ drone_factories!(
 );
 
 pub(crate) fn generate_drones(
-    controller_send: Sender<DroneEvent>,
+    controller_send: &Sender<DroneEvent>,
     controller_receivers: Vec<DroneAttributes>,
 ) -> Vec<Box<dyn DroneTrait>> {
     controller_receivers
@@ -126,8 +125,8 @@ pub(crate) fn generate_drones(
 
 #[derive(Clone)]
 pub struct Channel<T> {
-    sender: Sender<T>,
-    receiver: Receiver<T>,
+    pub(crate) sender: Sender<T>,
+    pub(crate) receiver: Receiver<T>,
 }
 
 impl<T> Channel<T> {
@@ -181,7 +180,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let drones = generate_drones(send_event, inputs);
+        let drones = generate_drones(&send_event, inputs);
 
         // 1) Count must match
         assert_eq!(drones.len(), 25);
@@ -192,7 +191,7 @@ mod tests {
 
             // This check only validates the index cycling
             // (we can't downcast Box<dyn DroneTrait> easily without extra work)
-            assert_eq!(expected_type as usize, i % FACTORIES.len());
+            assert_eq!(expected_type, i % FACTORIES.len());
         }
     }
 }

@@ -41,7 +41,7 @@ impl<T: Send + std::fmt::Debug> From<SendError<T>> for NetworkError {
 
 
 #[derive(Clone)]
-pub(crate) struct Node {
+pub struct Node {
     pub id: NodeId,
     kind: NodeType,
     adjacents: Vec<NodeId>
@@ -86,7 +86,7 @@ impl std::fmt::Debug for Node{
 
 #[derive(Debug, Clone, Default)]
 pub struct Network {
-    pub(crate) nodes: Vec<Node>
+    pub nodes: Vec<Node>
 }
 
 impl Network {

@@ -459,7 +459,7 @@ pub enum ServerType {
     MediaServer,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum NodeType {
     ChatServer,
     ChatClient,
@@ -475,7 +475,7 @@ impl Display for NodeType {
             Self::WebBrowser => write!(f, "Web-Browser"),
             Self::ChatServer => write!(f, "Chat-Server"),
             Self::MediaServer => write!(f, "Media-Server"),
-            Self::TextServer => write!(f, "Text-Server")
+            Self::TextServer => write!(f, "Text-Server"),
         }
     }
 }

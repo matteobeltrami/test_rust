@@ -225,7 +225,7 @@ impl NetworkInitializer<Uninitialized> {
         for c in &self.config.client {
             network.add_node_controller_view(c.id, NodeType::Client, &c.connected_drone_ids);
         }
-        
+
         for s in &self.config.server {
             network.add_node_controller_view(s.id, NodeType::Server, &s.connected_drone_ids);
         }
@@ -261,7 +261,9 @@ impl NetworkInitializer<Initialized> {
             self.node_handles.push(handle);
         }
         for mut client in self.initialized_clients.drain(..) {
-            let handle = std::thread::spawn(move || client.run());
+            let handle = std::thread::spawn(move || {
+                client.run();
+            });
             self.node_handles.push(handle);
         }
         for mut server in self.initialized_servers.drain(..) {
@@ -317,9 +319,23 @@ impl NetworkInitializer<Running> {
     /// # Panics
     /// Panics if it cannot join handle
     pub fn stop_simulation(&mut self) {
+        for (_, channel) in self.drone_command_channels.drain() {
+            let _ = channel.send(DroneCommand::Crash);
+            drop(channel);
+        }
+        for (_, (_, channel)) in self.node_command_channels.drain() {
+            let _ = channel.send(Box::new(common::types::NodeCommand::Shutdown));
+            drop(channel);
+        }
+        for (_, channel) in self.communications_channels.drain() {
+            drop(channel.get_sender());
+        }
+        
         for handle in self.node_handles.drain(..) {
             match handle.join() {
-                Ok(_) => {}
+                Ok(_) => {
+                    println!("Terminated a node thread successfully");
+                }
                 Err(e) => {
                     eprintln!("Failed to join a node thread: {:?}", e);
                 }

@@ -46,16 +46,7 @@ mod tests {
     }
     
     fn stop_simulation(sim: Simulation) {
-        let (mut running, drones, clients, servers, _network) = sim;
-        for (_, (_, tx)) in drones {
-            let _ = tx.send(DroneCommand::Crash);
-        }
-        for (_, (_, tx)) in clients {
-            let _ = tx.send(Box::new(NodeCommand::Shutdown));
-        }
-        for (_, (_, tx)) in servers {
-            let _ = tx.send(Box::new(NodeCommand::Shutdown));
-        }
+        let (mut running, _drones, _clients, _servers, _network) = sim;
         running.stop_simulation();
     }
 

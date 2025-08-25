@@ -53,7 +53,8 @@ pub trait Processor: Send {
                 recv(self.controller_recv()) -> cmd => {
                     if let Ok(cmd) = cmd {
                         if self.handle_command(cmd) {
-                            std::process::exit(0);
+                            println!("Sto terminando");
+                            return;
                         }
                     }
                 }
@@ -61,7 +62,7 @@ pub trait Processor: Send {
                 recv(self.packet_recv()) -> pkt => {
                     if let Ok(pkt) = pkt {
                         if self.handle_packet(pkt).is_err() {
-                            std::process::exit(0);
+                            return;
                         }
                     }
                 }
